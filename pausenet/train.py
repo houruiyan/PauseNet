@@ -189,7 +189,12 @@ def train_from_config(config: dict) -> Path:
     train_dataset = PauseNetDataset(data_dir / "train")
     validation_dataset = PauseNetDataset(data_dir / "validation")
     position_template = None
-    if bool(config.get("model", {}).get("use_position_template", True)):
+    if bool(
+        config.get("model", {}).get(
+            "use_position_template",
+            PauseNetConfig().use_position_template,
+        )
+    ):
         position_template = build_position_template(train_dataset)
         np.save(output_dir / "position_template.npy", position_template)
 

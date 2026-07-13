@@ -26,9 +26,8 @@ features learned in earlier layers.
 The profile head predicts a 1,000-bp probability distribution:
 
 ```text
-shared hidden features
+shared hidden features over central 1,000 bp
   -> Conv1D(128 -> 1, kernel=75)
-  -> optional learnable position template
   -> softmax over 1,000 positions
 ```
 
@@ -37,14 +36,19 @@ Because samples are strand-oriented, PauseNet uses a single softmax over the
 
 ## Count Head
 
-The default count head combines:
+The final default count head follows the ProCapNet-style count branch:
 
-- multi-scale mean and max pooling over 101, 251, 501, 1001 and 2114 bp;
-- attention pooling over sequence positions;
-- sequence composition features from the same windows;
-- an MLP with softplus output.
+```text
+shared hidden features
+  -> mean pooling across sequence positions
+  -> Linear(128 -> 1)
+  -> softplus
+```
 
 The output is predicted `log1p(counts)`.
+
+An experimental `multi_scale` count head is also available in the code, but it
+is not the default final model.
 
 ## Loss
 

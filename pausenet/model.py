@@ -20,8 +20,8 @@ class PauseNetConfig:
     dropout: float = 0.10
     profile_kernel_size: int = 75
     stem_kernel_size: int = 21
-    count_head: str = "multi_scale"
-    use_position_template: bool = True
+    count_head: str = "procapnet_mean"
+    use_position_template: bool = False
     attention_heads: int = 4
     pooling_widths: tuple[int, ...] = (101, 251, 501, 1001, 2114)
 
@@ -131,7 +131,7 @@ class ProfileHead(nn.Module):
 
 
 class MultiScaleCountHead(nn.Module):
-    """Count head using multi-scale mean/max pooling and attention pooling."""
+    """Optional experimental count head with multi-scale and attention pooling."""
 
     def __init__(
         self,
@@ -190,7 +190,7 @@ class MultiScaleCountHead(nn.Module):
 
 
 class MeanCountHead(nn.Module):
-    """Minimal ProCapNet-style count head."""
+    """ProCapNet-style count head: mean pooling, linear projection, softplus."""
 
     def __init__(self, channels: int):
         super().__init__()
@@ -241,7 +241,7 @@ class PauseNet(nn.Module):
                 attention_heads=self.config.attention_heads,
                 dropout=self.config.dropout,
             )
-        elif self.config.count_head == "simple_mean":
+        elif self.config.count_head in {"procapnet_mean", "simple_mean"}:
             self.count_head = MeanCountHead(self.config.channels)
         else:
             raise ValueError(f"Unknown count_head: {self.config.count_head}")

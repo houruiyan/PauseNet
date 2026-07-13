@@ -12,13 +12,11 @@ model:
   dropout: 0.10
   profile_kernel_size: 75
   stem_kernel_size: 21
-  count_head: multi_scale
-  use_position_template: true
-  attention_heads: 4
-  pooling_widths: [101, 251, 501, 1001, 2114]
+  count_head: procapnet_mean
+  use_position_template: false
 
 training:
-  output_dir: runs/hek293t_netseq_pausenet
+  output_dir: runs/hek293t_netseq_procapnet_style
   device: cuda:0
   batch_size: 48
   num_workers: 4

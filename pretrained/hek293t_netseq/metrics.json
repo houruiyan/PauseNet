@@ -1,12 +1,12 @@
 {
-  "model": "PauseNet-HEK293T-NETseq",
+  "model": "PauseNet-HEK293T-NETseq-ProCapNetStyle",
   "split": "test",
   "n": 57590,
-  "count_pearson_log1p": 0.5793023301,
-  "count_pearson_raw": 0.0443045317,
+  "count_pearson_log1p": 0.6238106665,
+  "count_pearson_raw": 0.0509780714,
   "profile_jsd_n": 50099,
-  "profile_jsd_1bp_mean": 0.9532340651,
-  "profile_jsd_5bp_mean": 0.8890033073,
-  "profile_jsd_10bp_mean": 0.8405303334,
-  "profile_jsd_20bp_mean": 0.7749572215
+  "profile_jsd_1bp_mean": 0.9530156039,
+  "profile_jsd_5bp_mean": 0.8880667268,
+  "profile_jsd_10bp_mean": 0.8388448458,
+  "profile_jsd_20bp_mean": 0.7720236102
 }
