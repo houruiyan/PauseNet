@@ -50,7 +50,7 @@ strand-position softmax.
 ## Installation
 
 ```bash
-git clone git@github.com:houruiyan/PauseNet.git
+git clone https://github.com/houruiyan/PauseNet.git
 cd PauseNet
 pip install -e .
 ```
