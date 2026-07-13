@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.DS_Store
+
+# Local environments
+.env
+.venv/
+venv/
+env/
+
+# Large local analysis outputs
+data/
+runs/
+outputs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.npz
+*.bw
+*.bigWig
+*.bedGraph
+*.bedgraph
+*.gz
+
+# Keep tiny metadata and examples trackable.
+!pretrained/**/metrics.json
+!paper/**/README.md

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pausenet"
+version = "0.1.0"
+description = "Sequence-based modeling of nascent transcription profiles and pausing counts."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  {name = "Ruiyan Hou"}
+]
+dependencies = [
+  "numpy>=1.23",
+  "pandas>=1.5",
+  "scipy>=1.9",
+  "pyyaml>=6.0",
+  "torch>=2.0",
+  "tqdm>=4.64"
+]
+
+[project.optional-dependencies]
+figures = [
+  "matplotlib>=3.7",
+  "seaborn>=0.12",
+  "logomaker>=0.8"
+]
+genomics = [
+  "pyfaidx>=0.7",
+  "pyBigWig>=0.3"
+]
+
+[project.scripts]
+pausenet = "pausenet.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pausenet*"]

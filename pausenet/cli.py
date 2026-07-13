@@ -1,0 +1,46 @@
+"""Command line interface for PauseNet."""
+
+from __future__ import annotations
+
+import argparse
+
+from .evaluate import evaluate_checkpoint
+from .train import load_config, train_from_config
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="pausenet")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    train_parser = subparsers.add_parser("train", help="Train PauseNet.")
+    train_parser.add_argument("--config", required=True)
+
+    eval_parser = subparsers.add_parser("evaluate", help="Evaluate a checkpoint.")
+    eval_parser.add_argument("--data-dir", required=True)
+    eval_parser.add_argument("--checkpoint", required=True)
+    eval_parser.add_argument("--output-dir", required=True)
+    eval_parser.add_argument("--split", default="test")
+    eval_parser.add_argument("--device", default="cuda:0")
+    eval_parser.add_argument("--batch-size", type=int, default=256)
+    eval_parser.add_argument("--num-workers", type=int, default=4)
+    eval_parser.add_argument("--no-save-predictions", action="store_true")
+
+    args = parser.parse_args()
+    if args.command == "train":
+        best_path = train_from_config(load_config(args.config))
+        print(f"Best checkpoint: {best_path}")
+    elif args.command == "evaluate":
+        evaluate_checkpoint(
+            data_dir=args.data_dir,
+            checkpoint=args.checkpoint,
+            output_dir=args.output_dir,
+            split=args.split,
+            device=args.device,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            save_predictions=not args.no_save_predictions,
+        )
+
+
+if __name__ == "__main__":
+    main()

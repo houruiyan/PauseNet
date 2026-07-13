@@ -1,0 +1,33 @@
+# Local server example used during PauseNet development.
+# This file is a template; adjust device/output_dir before running.
+
+data:
+  data_dir: /mnt/HDD8TB/houruiyan/pausing_site/data/NET_seq/HEK293T/model_data/gene_structure_anchored_windows
+
+model:
+  input_length: 2114
+  output_length: 1000
+  channels: 128
+  n_dilated_layers: 11
+  dropout: 0.10
+  profile_kernel_size: 75
+  stem_kernel_size: 21
+  count_head: multi_scale
+  use_position_template: true
+  attention_heads: 4
+  pooling_widths: [101, 251, 501, 1001, 2114]
+
+training:
+  output_dir: /mnt/HDD8TB/houruiyan/pausing_site/data/NET_seq/HEK293T/final/github_runs/pausenet_hek293t_netseq
+  device: cuda:0
+  batch_size: 48
+  num_workers: 4
+  learning_rate: 0.00014
+  weight_decay: 0.00001
+  max_epochs: 60
+  patience: 8
+  seed: 20260713
+  counts_weight: 100.0
+  profile_loss: mnll
+  grad_accum_steps: 1
+  progress: true
