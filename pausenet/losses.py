@@ -71,7 +71,7 @@ def multiresolution_profile_jsd_loss(
     resolutions: tuple[int, ...] = (1, 5, 10, 20),
     weights: tuple[float, ...] = (0.55, 0.15, 0.15, 0.15),
 ) -> torch.Tensor:
-    """Differentiable profile-shape loss used by earlier PauseNet experiments."""
+    """Optional differentiable profile-shape loss."""
 
     totals = observed_profiles.sum(dim=-1)
     valid = profile_masks.bool() & (totals > 0)

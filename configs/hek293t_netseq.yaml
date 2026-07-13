@@ -12,8 +12,6 @@ model:
   dropout: 0.10
   profile_kernel_size: 75
   stem_kernel_size: 21
-  count_head: procapnet_mean
-  use_position_template: false
 
 training:
   output_dir: runs/hek293t_netseq_procapnet_style

@@ -71,29 +71,3 @@ class PauseNetDataset(Dataset):
             "sample_type": torch.tensor(int(self.sample_types[index]), dtype=torch.uint8),
             "index": torch.tensor(index, dtype=torch.int64),
         }
-
-
-def build_position_template(dataset: PauseNetDataset, chunk_size: int = 2048) -> np.ndarray:
-    """Build an average observed profile template from positive examples."""
-
-    if len(dataset.profiles.shape) != 2:
-        raise ValueError("profiles.npy must be a 2D array")
-    positive = np.flatnonzero(np.asarray(dataset.sample_types) == 0)
-    if len(positive) == 0:
-        positive = np.arange(len(dataset))
-    total = np.zeros(dataset.profiles.shape[1], dtype=np.float64)
-    used = 0
-    for start in range(0, len(positive), chunk_size):
-        indices = positive[start : start + chunk_size]
-        profiles = np.asarray(dataset.profiles[indices], dtype=np.float64)
-        totals = profiles.sum(axis=1, keepdims=True)
-        valid = totals[:, 0] > 0
-        if not valid.any():
-            continue
-        total += (profiles[valid] / totals[valid]).sum(axis=0)
-        used += int(valid.sum())
-    if used == 0:
-        template = np.ones(dataset.profiles.shape[1], dtype=np.float64)
-    else:
-        template = total / used + 1e-5
-    return (template / template.sum()).astype(np.float32)

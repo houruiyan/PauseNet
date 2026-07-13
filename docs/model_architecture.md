@@ -9,7 +9,7 @@ one-hot tensor. `N` bases are encoded as all zeros.
 
 ## Shared Backbone
 
-The default model uses:
+PauseNet uses:
 
 - initial Conv1D, kernel size 21;
 - 11 dilated residual Conv1D blocks;
@@ -19,7 +19,7 @@ The default model uses:
 
 Dilated convolutions allow the model to integrate local motif information and
 larger genomic context. Residual connections stabilize optimization and preserve
-features learned in earlier layers.
+features learned in shallow layers.
 
 ## Profile Head
 
@@ -36,7 +36,7 @@ Because samples are strand-oriented, PauseNet uses a single softmax over the
 
 ## Count Head
 
-The final default count head follows the ProCapNet-style count branch:
+The count head follows the ProCapNet-style count branch:
 
 ```text
 shared hidden features
@@ -46,9 +46,6 @@ shared hidden features
 ```
 
 The output is predicted `log1p(counts)`.
-
-An experimental `multi_scale` count head is also available in the code, but it
-is not the default final model.
 
 ## Loss
 

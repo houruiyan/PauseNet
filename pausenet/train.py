@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import fields
 import json
 import random
 import time
@@ -14,7 +15,7 @@ import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from .dataset import PauseNetDataset, build_position_template
+from .dataset import PauseNetDataset
 from .losses import pausenet_loss
 from .metrics import js_distance_rows, safe_pearson
 from .model import PauseNet, PauseNetConfig
@@ -48,8 +49,8 @@ def make_loader(dataset: PauseNetDataset, batch_size: int, num_workers: int, shu
 
 def model_config_from_dict(config: dict) -> PauseNetConfig:
     model_cfg = dict(config.get("model", {}))
-    if "pooling_widths" in model_cfg:
-        model_cfg["pooling_widths"] = tuple(model_cfg["pooling_widths"])
+    allowed = {field.name for field in fields(PauseNetConfig)}
+    model_cfg = {key: value for key, value in model_cfg.items() if key in allowed}
     return PauseNetConfig(**model_cfg)
 
 
@@ -188,17 +189,7 @@ def train_from_config(config: dict) -> Path:
 
     train_dataset = PauseNetDataset(data_dir / "train")
     validation_dataset = PauseNetDataset(data_dir / "validation")
-    position_template = None
-    if bool(
-        config.get("model", {}).get(
-            "use_position_template",
-            PauseNetConfig().use_position_template,
-        )
-    ):
-        position_template = build_position_template(train_dataset)
-        np.save(output_dir / "position_template.npy", position_template)
-
-    model = PauseNet(model_config_from_dict(config), position_template=position_template).to(device)
+    model = PauseNet(model_config_from_dict(config)).to(device)
     train_loader = make_loader(
         train_dataset,
         int(config["training"].get("batch_size", 64)),

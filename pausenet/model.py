@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -20,10 +18,6 @@ class PauseNetConfig:
     dropout: float = 0.10
     profile_kernel_size: int = 75
     stem_kernel_size: int = 21
-    count_head: str = "procapnet_mean"
-    use_position_template: bool = False
-    attention_heads: int = 4
-    pooling_widths: tuple[int, ...] = (101, 251, 501, 1001, 2114)
 
 
 class DilatedResidualBlock(nn.Module):
@@ -83,110 +77,19 @@ class SequenceBackbone(nn.Module):
         return F.gelu(self.final_norm(hidden))
 
 
-def make_position_template(template: np.ndarray | None, output_length: int) -> torch.Tensor:
-    """Return log position-template initialization."""
-
-    if template is None:
-        values = np.ones(output_length, dtype=np.float32)
-    else:
-        values = np.asarray(template, dtype=np.float32)
-        if values.shape != (output_length,):
-            raise ValueError(
-                f"position template has shape {values.shape}, expected {(output_length,)}"
-            )
-        values = np.maximum(values, 1e-6)
-    values = values / values.sum()
-    return torch.as_tensor(np.log(values), dtype=torch.float32)
-
-
 class ProfileHead(nn.Module):
     """Profile head for strand-oriented single-track profile prediction."""
 
     def __init__(
         self,
         channels: int,
-        output_length: int,
         kernel_size: int = 75,
-        position_template: np.ndarray | None = None,
-        use_position_template: bool = True,
     ):
         super().__init__()
-        self.output_length = output_length
         self.conv = nn.Conv1d(channels, 1, kernel_size=kernel_size, padding=kernel_size // 2)
-        self.use_position_template = use_position_template
-        if use_position_template:
-            self.position_logits = nn.Parameter(
-                make_position_template(position_template, output_length)
-            )
-            self.residual_scale = nn.Parameter(torch.tensor(0.25))
-        else:
-            self.position_logits = None
-            self.residual_scale = None
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        residual_logits = self.conv(hidden).squeeze(1)
-        if not self.use_position_template:
-            return residual_logits
-        return self.position_logits.unsqueeze(0) + self.residual_scale * residual_logits
-
-
-class MultiScaleCountHead(nn.Module):
-    """Optional experimental count head with multi-scale and attention pooling."""
-
-    def __init__(
-        self,
-        channels: int,
-        input_length: int,
-        pooling_widths: Iterable[int],
-        attention_heads: int,
-        dropout: float,
-    ):
-        super().__init__()
-        self.input_length = input_length
-        self.pooling_widths = tuple(pooling_widths)
-        self.attention = nn.Conv1d(channels, attention_heads, kernel_size=1)
-        pooled_channels = channels * (2 * len(self.pooling_widths) + attention_heads)
-        sequence_composition_channels = 4 * len(self.pooling_widths)
-        self.mlp = nn.Sequential(
-            nn.Linear(pooled_channels + sequence_composition_channels, channels * 2),
-            nn.LayerNorm(channels * 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(channels * 2, channels),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(channels, 1),
-        )
-
-    def _center_region(self, values: torch.Tensor, width: int) -> torch.Tensor:
-        center = self.input_length // 2
-        start = max(center - width // 2, 0)
-        end = min(start + width, values.shape[-1])
-        return values[..., start:end]
-
-    def sequence_composition(self, sequence: torch.Tensor) -> torch.Tensor:
-        features = []
-        for width in self.pooling_widths:
-            region = self._center_region(sequence, width)
-            features.append(region.mean(dim=-1))
-        return torch.cat(features, dim=1)
-
-    def count_pooling(self, hidden: torch.Tensor) -> torch.Tensor:
-        features = []
-        for width in self.pooling_widths:
-            region = self._center_region(hidden, width)
-            features.extend([region.mean(dim=-1), region.amax(dim=-1)])
-        attention = torch.softmax(self.attention(hidden), dim=-1)
-        attention_pool = torch.einsum("bhl,bcl->bhc", attention, hidden)
-        features.append(attention_pool.flatten(start_dim=1))
-        return torch.cat(features, dim=1)
-
-    def forward(self, sequence: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
-        features = torch.cat(
-            [self.count_pooling(hidden), self.sequence_composition(sequence)],
-            dim=1,
-        )
-        return F.softplus(self.mlp(features).squeeze(1))
+        return self.conv(hidden).squeeze(1)
 
 
 class MeanCountHead(nn.Module):
@@ -207,7 +110,6 @@ class PauseNet(nn.Module):
     def __init__(
         self,
         config: PauseNetConfig | None = None,
-        position_template: np.ndarray | None = None,
     ):
         super().__init__()
         self.config = config or PauseNetConfig()
@@ -228,23 +130,9 @@ class PauseNet(nn.Module):
         )
         self.profile_head = ProfileHead(
             channels=self.config.channels,
-            output_length=self.config.output_length,
             kernel_size=self.config.profile_kernel_size,
-            position_template=position_template,
-            use_position_template=self.config.use_position_template,
         )
-        if self.config.count_head == "multi_scale":
-            self.count_head = MultiScaleCountHead(
-                channels=self.config.channels,
-                input_length=self.config.input_length,
-                pooling_widths=self.config.pooling_widths,
-                attention_heads=self.config.attention_heads,
-                dropout=self.config.dropout,
-            )
-        elif self.config.count_head in {"procapnet_mean", "simple_mean"}:
-            self.count_head = MeanCountHead(self.config.channels)
-        else:
-            raise ValueError(f"Unknown count_head: {self.config.count_head}")
+        self.count_head = MeanCountHead(self.config.channels)
 
     def encode(self, sequence_codes: torch.Tensor) -> torch.Tensor:
         return self.encoding[sequence_codes.long()].transpose(1, 2)

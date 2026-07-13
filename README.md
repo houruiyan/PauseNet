@@ -18,9 +18,8 @@ PauseNet takes strand-oriented DNA sequence as input and predicts two outputs:
 - a base-resolution profile distribution over a 1,000-bp prediction window;
 - the total pausing activity as predicted `log1p(counts)`.
 
-The final default model uses a ProCapNet-style sequence-only architecture:
-a shared dilated residual Conv1D backbone followed by one profile head and one
-count head.
+PauseNet uses a ProCapNet-style sequence-only architecture: a shared dilated
+residual Conv1D backbone followed by one profile head and one count head.
 
 ```text
 2,114-bp DNA sequence
