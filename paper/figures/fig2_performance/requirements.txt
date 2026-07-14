@@ -1,0 +1,3 @@
+# Extras required only for Figure 2 attribution and motif discovery.
+h5py>=3.8
+modiscolite
