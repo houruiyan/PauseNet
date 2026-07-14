@@ -13,6 +13,8 @@ PauseNet split-directory format.
    discover positive and negative sequence motifs with modisco-lite.
 3. `run_figure2_motif_discovery.sh` runs the two steps in sequence for both
    model tasks.
+4. `03_plot_tfmodisco_pwm_pca.py` builds a count/profile motif atlas and
+   PWM-similarity PCoA projections from the two TF-MoDISco HDF5 files.
 
 The profile attribution target is a differentiable profile-shape score: the
 mean-centered profile logits weighted by the detached predicted softmax
@@ -46,6 +48,22 @@ count and profile tasks.
 
 For a faster exploratory run, add `--max-samples` directly to the Python
 commands. Run `python ... --help` for all options.
+
+## Plot the updated motif atlas and PWM projection
+
+```bash
+python paper/figures/fig2_performance/03_plot_tfmodisco_pwm_pca.py \
+  --count-h5 /path/to/count_tfmodisco_patterns.h5 \
+  --profile-h5 /path/to/profile_tfmodisco_patterns.h5 \
+  --outdir /path/to/figure2_pwm_pcoa
+```
+
+This produces three vector PDFs: an atlas of all discovered motifs, a labelled
+PWM-similarity projection, and an unlabelled projection with four motif
+neighbourhoods. The projection is a classical PCoA of pairwise PWM distances;
+each pair is compared after optimizing relative alignment and reverse-
+complement orientation. The four visual neighbourhoods are K-means groups
+on the first two PCoA coordinates.
 
 ## Outputs
 

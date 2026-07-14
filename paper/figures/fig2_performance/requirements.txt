@@ -1,3 +1,6 @@
 # Extras required only for Figure 2 attribution and motif discovery.
 h5py>=3.8
+logomaker>=0.8
+matplotlib>=3.7
 modiscolite
+scikit-learn>=1.2
