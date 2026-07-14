@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from .evaluate import evaluate_checkpoint
+from .prepare_bigwig import add_prepare_bigwig_args, run_prepare_bigwig_from_args
 from .train import load_config, train_from_config
 
 
@@ -25,6 +26,12 @@ def main() -> None:
     eval_parser.add_argument("--num-workers", type=int, default=4)
     eval_parser.add_argument("--no-save-predictions", action="store_true")
 
+    prepare_parser = subparsers.add_parser(
+        "prepare-bigwig",
+        help="Create PauseNet split directories from strand-specific bigWig files.",
+    )
+    add_prepare_bigwig_args(prepare_parser)
+
     args = parser.parse_args()
     if args.command == "train":
         best_path = train_from_config(load_config(args.config))
@@ -40,6 +47,8 @@ def main() -> None:
             num_workers=args.num_workers,
             save_predictions=not args.no_save_predictions,
         )
+    elif args.command == "prepare-bigwig":
+        run_prepare_bigwig_from_args(args)
 
 
 if __name__ == "__main__":

@@ -88,3 +88,22 @@ split
 
 `region_type` can be `TSS`, `5SS`, `3SS`, `TES`, or any user-defined anchor
 type.
+
+## Creating This Format from bigWig Files
+
+If users start from strand-specific positive and negative NET-seq, GRO-seq or
+PRO-seq bigWig files, use:
+
+```bash
+pausenet prepare-bigwig \
+  --pos-bw sample.pos.bw \
+  --neg-bw sample.neg.bw \
+  --fasta hg38.fa \
+  --anchors-bed anchors.tsv \
+  --output-dir pausenet_dataset
+```
+
+The converter needs an anchor BED/TSV because bigWig files contain signal but
+do not define model examples. See
+[bigwig_to_dataset.md](bigwig_to_dataset.md) for the required anchor columns,
+strand-orientation rules and split options.

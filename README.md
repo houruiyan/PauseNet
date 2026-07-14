@@ -56,6 +56,12 @@ pip install -e .
 ```
 
 For GPU training, install a PyTorch build matching your CUDA version first.
+If you want to prepare datasets directly from strand-specific bigWig files,
+install the optional genomics dependencies:
+
+```bash
+pip install -e ".[genomics]"
+```
 
 ## Standard Data Format
 
@@ -91,6 +97,31 @@ Required arrays:
 - `manifest.tsv`: metadata table with genomic coordinates and annotations.
 
 See [docs/data_format.md](docs/data_format.md) for details.
+
+## Prepare Data from Strand-Specific bigWig Files
+
+If you only have positive- and negative-strand NET-seq, GRO-seq or PRO-seq
+bigWig files, first define the genomic anchors/windows that should become
+PauseNet examples. For example, these can be TSS, 5SS, 3SS, TES or
+peak-centered anchors.
+
+Then convert the signal tracks into the standard PauseNet format:
+
+```bash
+pausenet prepare-bigwig \
+  --pos-bw /path/to/sample.pos.bw \
+  --neg-bw /path/to/sample.neg.bw \
+  --fasta /path/to/hg38.fa \
+  --anchors-bed /path/to/anchors.tsv \
+  --output-dir /path/to/pausenet_dataset \
+  --cell-line HEK293T \
+  --assay NET-seq
+```
+
+The converter writes `sequence_codes.npy`, `profiles.npy`, `counts.npy`,
+`profile_loss_mask.npy`, `sample_types.npy` and `manifest.tsv` for each split.
+See [docs/bigwig_to_dataset.md](docs/bigwig_to_dataset.md) for the full input
+format and options.
 
 ## Train a Model
 
