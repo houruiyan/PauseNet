@@ -29,7 +29,7 @@ def main() -> None:
 
     prepare_parser = subparsers.add_parser(
         "prepare-bigwig",
-        help="Build fixed gene-structure PauseNet windows from strand-specific bigWig files.",
+        help="Create PauseNet split directories from strand-specific bigWig files.",
     )
     add_prepare_bigwig_args(prepare_parser)
 

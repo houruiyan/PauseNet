@@ -1,53 +1,61 @@
-# Build a Fixed Gene-Structure PauseNet Dataset from Strand-Specific bigWigs
+# Prepare a PauseNet Dataset from Strand-Specific bigWig Files
 
-`pausenet prepare-bigwig` builds the standard PauseNet dataset from a gene
-annotation, a matched reference genome and positive/negative strand signal
-tracks. It does not accept arbitrary peak-centered or anchor-centered windows.
-Every example is one of five predefined 1-kb windows around a gene-structure
-landmark.
+This document describes how to convert strand-specific NET-seq, GRO-seq or
+PRO-seq signal tracks into the standard PauseNet training format.
 
-## Required inputs
+## Required Inputs
 
-1. Positive-strand bigWig, for example `sample.pos.bw`.
-2. Negative-strand bigWig, for example `sample.neg.bw`.
-3. Reference genome FASTA matching the bigWig coordinates.
-4. Chromosome-size file matching the FASTA.
-5. A GTF or GTF.GZ annotation containing exon records.
+Strand-specific bigWig files alone are not sufficient, because bigWig files
+store signal but do not define which genomic windows should become model
+examples. To build a PauseNet dataset you need:
 
-Optional input:
+1. Positive-strand signal bigWig, for example `sample.pos.bw`.
+2. Negative-strand signal bigWig, for example `sample.neg.bw`.
+3. Reference genome FASTA, matching the coordinates of the bigWig files.
+4. An anchor BED/TSV file defining one row per model example.
 
-- An expressed-gene BED-like file. Identifiers from columns 4 onward are used
-  to restrict the dataset to expressed genes.
+The anchor BED can contain TSS, 5SS, 3SS, TES, peak-centered windows, or any
+other user-defined regions. PauseNet will create a 2,114-bp input sequence and
+a 1,000-bp central prediction region centered on each anchor.
 
-## Gene and transcript selection
+## Anchor BED/TSV Format
 
-The converter reads exon records from the GTF, optionally restricts them to
-protein-coding transcripts, and keeps transcripts with at least two exons by
-default. For each eligible expressed gene it selects one representative
-transcript: the transcript with the largest summed exon length, then the
-largest genomic span, then the most exons.
+The file can be headered or BED-like without a header. The minimum required
+columns are:
 
-The selected transcript supplies one TSS and one TES. Each exon junction
-supplies one 5'SS and one 3'SS. To prevent unusually intron-rich genes from
-dominating the dataset, at most `--max-ss-per-gene` junctions are retained per
-gene; if limiting is necessary, they are sampled evenly across the transcript.
+```text
+chrom
+start
+end
+strand
+```
 
-## Fixed five-window scheme
+Recommended columns:
 
-All intervals below are in the transcription direction and are half-open,
-relative to the landmark coordinate. Every interval is a distinct 1-kb model
-example.
+```text
+chrom
+start
+end
+sample_id
+score
+strand
+region_type
+gene_id
+gene_name
+transcript_id
+split
+```
 
-| Landmark | w0 | w1 | w2 | w3 | w4 |
-| --- | --- | --- | --- | --- | --- |
-| TSS | -1000..0 | 0..+1000 | +1000..+2000 | +2000..+3000 | +3000..+4000 |
-| 5'SS | -2500..-1500 | -1500..-500 | -500..+500 | +500..+1500 | +1500..+2500 |
-| 3'SS | -2500..-1500 | -1500..-500 | -500..+500 | +500..+1500 | +1500..+2500 |
-| TES | -4000..-3000 | -3000..-2000 | -2000..-1000 | -1000..0 | 0..+1000 |
+`region_type` can be `TSS`, `5SS`, `3SS`, `TES`, `peak`, or any user-defined
+label. `split` should usually be one of `train`, `validation`, or `test`.
 
-Thus the landmark is on a window boundary for TSS and TES, and at the centre
-of `w2` for 5'SS and 3'SS. A 1-kb output window receives 557 bp of context on
-each side, producing the fixed 2,114-bp model input.
+Example:
+
+```text
+chrom	start	end	sample_id	score	strand	region_type	gene_id	gene_name	transcript_id	split
+chr1	11873	11874	DDX11L1_TSS	0	+	TSS	ENSG00000223972	DDX11L1	ENST00000456328	train
+chr1	29370	29371	WASH7P_TES	0	-	TES	ENSG00000227232	WASH7P	ENST00000488147	test
+```
 
 ## Command
 
@@ -64,43 +72,83 @@ pausenet prepare-bigwig \
   --pos-bw /path/to/sample.pos.bw \
   --neg-bw /path/to/sample.neg.bw \
   --fasta /path/to/hg38.fa \
-  --gtf /path/to/genes.gtf.gz \
-  --expressed-genes-bed /path/to/expressed_genes.bed \
-  --chrom-sizes /path/to/hg38.chrom.sizes \
+  --anchors-bed /path/to/anchors.tsv \
   --output-dir /path/to/pausenet_dataset \
-  --train-chroms chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr9,chr10 \
-  --validation-chroms chr8 \
-  --test-chroms chr11,chr12 \
-  --max-ss-per-gene 20 \
   --cell-line HEK293T \
   --assay NET-seq
 ```
 
-Chromosome sets must be disjoint. Any chromosome outside the supplied sets is
-assigned to `--default-split`, which is `train` by default. Specify all three
-sets explicitly for a chromosome-held-out evaluation.
+This writes split directories such as:
 
-## Strand orientation and labels
+```text
+pausenet_dataset/
+  train/
+    sequence_codes.npy
+    profiles.npy
+    counts.npy
+    profile_loss_mask.npy
+    manifest.tsv
+  validation/
+  test/
+```
 
-Every output window is converted to the 5' to 3' transcription direction:
+## Strand Orientation
 
-- `+` strand examples use the positive-strand bigWig and forward genomic DNA.
-- `-` strand examples use the negative-strand bigWig; the DNA sequence is
-  reverse-complemented and the 1-kb profile is reversed.
+PauseNet expects every example in transcriptional 5' to 3' orientation.
 
-The converter treats negative bigWig values as display convention and uses the
-absolute value as read signal. It writes `sequence_codes.npy`, `profiles.npy`,
-`counts.npy`, `profile_loss_mask.npy`, `anchor_type_codes.npy`,
-`original_strands.npy` and `manifest.tsv` to every split directory.
+- `+` strand anchors use the positive-strand bigWig and the reference sequence
+  as-is.
+- `-` strand anchors use the negative-strand bigWig; both the DNA sequence and
+  the 1,000-bp profile are reversed into 5' to 3' orientation.
 
-The manifest records `anchor_type`, `anchor_position`, `window_index`,
-`relative_start`, `relative_end`, and the actual genomic input/output
-coordinates. These fields let downstream analyses separate the five windows
-from the same landmark and retain the original anchor context.
+By default, the converter uses absolute bigWig values. This is useful when a
+negative-strand bigWig stores signal as negative values for genome-browser
+visualization. Use `--preserve-signed-signal` only if your bigWig values are
+meaningful signed quantities rather than read counts.
 
-## Profile mask
+## Split Assignment
 
-`profile_loss_mask.npy` is 1 when the total signal in the 1-kb output window
-is at least `--profile-min-count` (default 1). Count loss still uses all
-examples; the mask excludes zero-signal profiles from the multinomial profile
-loss and profile JSD metrics.
+If the anchor file has a `split` column, PauseNet uses it directly.
+
+If the anchor file does not have a split column, you can assign splits by
+chromosome:
+
+```bash
+pausenet prepare-bigwig \
+  --pos-bw sample.pos.bw \
+  --neg-bw sample.neg.bw \
+  --fasta hg38.fa \
+  --anchors-bed anchors.bed \
+  --output-dir pausenet_dataset \
+  --train-chroms chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr9,chr10 \
+  --validation-chroms chr8 \
+  --test-chroms chr11,chr12
+```
+
+Any anchor not assigned by a chromosome list is written to `--default-split`,
+which is `train` by default.
+
+## Profile Loss Mask
+
+`profile_loss_mask.npy` is set to 1 when the total signal in the 1,000-bp
+prediction region is at least `--profile-min-count`:
+
+```bash
+--profile-min-count 1
+```
+
+Count loss still uses all examples. The profile mask prevents zero-signal
+profiles from contributing to the multinomial/profile loss.
+
+## What the Converter Does
+
+For each anchor row:
+
+1. Center a 1,000-bp output region on the anchor midpoint.
+2. Add 557 bp context on both sides to create the 2,114-bp input sequence.
+3. Fetch and encode the reference DNA sequence as `A=0, C=1, G=2, T=3, N=4`.
+4. Fetch the matching strand-specific bigWig signal over the 1,000-bp output
+   region.
+5. Reverse-complement negative-strand examples into transcriptional
+   orientation.
+6. Save the standard PauseNet arrays and `manifest.tsv`.
