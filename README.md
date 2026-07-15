@@ -72,9 +72,10 @@ my_dataset/
   train/
     sequence_codes.npy
     profiles.npy
-    counts.npy
-    profile_loss_mask.npy
-    manifest.tsv
+  counts.npy
+  profile_loss_mask.npy
+  anchor_type_codes.npy
+  manifest.tsv
   validation/
     ...
   test/
@@ -91,32 +92,54 @@ Required arrays:
   region.
 - `profile_loss_mask.npy`: shape `(N,)`, 1 for examples used in the profile
   loss and profile JSD evaluation.
+- `anchor_type_codes.npy`: shape `(N,)`, codes for `TSS`, `5SS`, `3SS` and
+  `TES`, used for anchor-balanced sampling when requested.
+- `original_strands.npy`: shape `(N,)`, `+1` or `-1` before the negative
+  strand sequence/profile were reoriented to transcription direction.
 - `manifest.tsv`: metadata table with genomic coordinates and annotations.
 
 See [docs/data_format.md](docs/data_format.md) for details.
 
 ## Prepare Data from Strand-Specific bigWig Files
 
-If you only have positive- and negative-strand NET-seq, GRO-seq or PRO-seq
-bigWig files, first define the genomic anchors/windows that should become
-PauseNet examples. For example, these can be TSS, 5SS, 3SS, TES or
-peak-centered anchors.
+PauseNet constructs examples from gene structure rather than arbitrary
+peak-centered windows. It selects one representative transcript per expressed
+gene, defines TSS, 5'SS, 3'SS and TES landmarks, and expands each landmark
+into five adjacent 1-kb prediction windows in transcription-oriented
+coordinates:
 
-Then convert the signal tracks into the standard PauseNet format:
+```text
+TSS:  -1000..0, 0..+1000, +1000..+2000, +2000..+3000, +3000..+4000
+5'SS: -2500..-1500, -1500..-500, -500..+500, +500..+1500, +1500..+2500
+3'SS: -2500..-1500, -1500..-500, -500..+500, +500..+1500, +1500..+2500
+TES:  -4000..-3000, -3000..-2000, -2000..-1000, -1000..0, 0..+1000
+```
+
+Every 1-kb output window receives 557 bp of flanking context on both sides,
+giving a 2,114-bp sequence input. Build the dataset directly from a GTF, an
+optional expressed-gene list, and strand-specific bigWig files:
 
 ```bash
 pausenet prepare-bigwig \
   --pos-bw /path/to/sample.pos.bw \
   --neg-bw /path/to/sample.neg.bw \
   --fasta /path/to/hg38.fa \
-  --anchors-bed /path/to/anchors.tsv \
+  --gtf /path/to/genes.gtf.gz \
+  --expressed-genes-bed /path/to/expressed_genes.bed \
+  --chrom-sizes /path/to/hg38.chrom.sizes \
   --output-dir /path/to/pausenet_dataset \
+  --train-chroms chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr9,chr10 \
+  --validation-chroms chr8 \
+  --test-chroms chr11,chr12 \
   --cell-line HEK293T \
   --assay NET-seq
 ```
 
 The converter writes `sequence_codes.npy`, `profiles.npy`, `counts.npy`,
-`profile_loss_mask.npy` and `manifest.tsv` for each split.
+`profile_loss_mask.npy`, `anchor_type_codes.npy`, `original_strands.npy` and
+`manifest.tsv` for each split, plus a dataset-level `dataset_summary.json`.
+The manifest retains the original landmark, window index and gene-oriented
+window coordinates for every sample.
 See [docs/bigwig_to_dataset.md](docs/bigwig_to_dataset.md) for the full input
 format and options.
 
