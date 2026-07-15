@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .dataset import PauseNetDataset
+from .metrics import profile_similarity_summary
 from .model import PauseNet, PauseNetConfig
 from .train import model_config_from_dict, run_epoch
 
@@ -59,6 +60,14 @@ def evaluate_checkpoint(
     metrics["n"] = int(len(dataset))
     with (output_dir / f"{split}_metrics.json").open("w") as handle:
         json.dump(metrics, handle, indent=2)
+    similarity = pd.DataFrame(
+        profile_similarity_summary(
+            outputs["observed_profiles"],
+            outputs["predicted_profiles"],
+            outputs["profile_masks"],
+        )
+    )
+    similarity.to_csv(output_dir / f"{split}_profile_similarity.tsv", sep="\t", index=False)
     if save_predictions:
         table = pd.DataFrame(
             {

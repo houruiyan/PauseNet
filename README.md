@@ -146,6 +146,25 @@ Evaluation reports:
 - raw count Pearson correlation;
 - profile Jensen-Shannon distance at 1, 5, 10 and 20 bp resolution.
 
+It also writes `test_predictions.tsv` and `test_profile_similarity.tsv`, which
+can be visualized after installing the optional figure dependencies:
+
+```bash
+python -m pip install -e ".[figures]"
+
+pausenet visualize \
+  --evaluation-dir outputs/my_test_eval \
+  --split test \
+  --format png
+```
+
+This creates `figures/test_count_scatter.png` (observed versus predicted
+`log1p(counts)`) and `figures/test_profile_similarity.png` (mean `1 - JSD` at
+1, 5, 10 and 20 bp). The profile plot compares PauseNet with a binomially split
+pseudoreplicate baseline and a within-profile random-permutation baseline. Use
+`--output-dir /path/to/figures` to choose another destination, or `--format pdf`
+or `--format svg` for vector output.
+
 ## Pretrained Models
 
 Pretrained model weights are not stored directly in this repository. Model
