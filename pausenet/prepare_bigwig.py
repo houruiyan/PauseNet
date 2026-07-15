@@ -29,7 +29,6 @@ BED_COLUMNS = [
     "gene_name",
     "transcript_id",
     "split",
-    "sample_type",
 ]
 REVCOMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 
@@ -133,21 +132,6 @@ def assign_split(
     return default_split
 
 
-def sample_type_code(value) -> int:
-    if pd.isna(value):
-        return 0
-    if isinstance(value, (int, np.integer)):
-        return int(value)
-    text = str(value).strip().lower()
-    if text in {"0", "positive", "pos", "peak"}:
-        return 0
-    if text in {"1", "hard_negative", "hard-negative", "hard"}:
-        return 1
-    if text in {"2", "zero_negative", "zero-negative", "zero"}:
-        return 2
-    return 0
-
-
 def save_split(output_dir: Path, split_name: str, rows: list[dict]) -> None:
     split_dir = output_dir / split_name
     split_dir.mkdir(parents=True, exist_ok=True)
@@ -159,11 +143,6 @@ def save_split(output_dir: Path, split_name: str, rows: list[dict]) -> None:
         split_dir / "profile_loss_mask.npy",
         np.asarray([row["profile_loss_mask"] for row in rows], dtype=np.uint8),
     )
-    np.save(
-        split_dir / "sample_types.npy",
-        np.asarray([row["sample_type"] for row in rows], dtype=np.uint8),
-    )
-
     manifest_rows = []
     for row in rows:
         manifest_rows.append(
@@ -262,8 +241,6 @@ def prepare_bigwig_dataset(
 
         sample_id = row.get("sample_id", row.get("name", f"{chrom}:{output_start}-{output_end}:{strand}"))
         region_type = row.get("region_type", "region")
-        sample_type = sample_type_code(row.get("sample_type", 0))
-
         splits[split].append(
             {
                 "sample_id": sample_id,
@@ -281,7 +258,6 @@ def prepare_bigwig_dataset(
                 "cell_line": cell_line,
                 "assay": assay,
                 "split": split,
-                "sample_type": sample_type,
                 "count": count,
                 "profile_loss_mask": int(count >= profile_min_count),
                 "sequence_codes": sequence_codes,
@@ -356,4 +332,3 @@ def run_prepare_bigwig_from_args(args: argparse.Namespace) -> None:
     print("PauseNet dataset written.")
     for key, value in summary.items():
         print(f"{key}: {value}")
-

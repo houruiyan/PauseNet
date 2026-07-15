@@ -74,7 +74,6 @@ my_dataset/
     profiles.npy
     counts.npy
     profile_loss_mask.npy
-    sample_types.npy
     manifest.tsv
   validation/
     ...
@@ -92,8 +91,6 @@ Required arrays:
   region.
 - `profile_loss_mask.npy`: shape `(N,)`, 1 for examples used in the profile
   loss and profile JSD evaluation.
-- `sample_types.npy`: shape `(N,)`, optional sample type code. By convention,
-  `0` denotes positive/high-confidence windows.
 - `manifest.tsv`: metadata table with genomic coordinates and annotations.
 
 See [docs/data_format.md](docs/data_format.md) for details.
@@ -119,7 +116,7 @@ pausenet prepare-bigwig \
 ```
 
 The converter writes `sequence_codes.npy`, `profiles.npy`, `counts.npy`,
-`profile_loss_mask.npy`, `sample_types.npy` and `manifest.tsv` for each split.
+`profile_loss_mask.npy` and `manifest.tsv` for each split.
 See [docs/bigwig_to_dataset.md](docs/bigwig_to_dataset.md) for the full input
 format and options.
 

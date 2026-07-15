@@ -10,7 +10,6 @@ dataset/
     profiles.npy
     counts.npy
     profile_loss_mask.npy
-    sample_types.npy
     manifest.tsv
   validation/
   test/
@@ -54,16 +53,6 @@ Shape: `(N,)`
 
 Boolean or `0/1` mask indicating which examples are used for the profile loss
 and profile JSD evaluation. Count prediction still uses all examples.
-
-### `sample_types.npy`
-
-Shape: `(N,)`
-
-Optional sample type code. The default convention is:
-
-- `0`: positive/high-confidence windows;
-- `1`: hard negative windows;
-- `2`: zero-signal negative windows.
 
 ## Manifest
 

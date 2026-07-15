@@ -26,12 +26,6 @@ class PauseNetDataset(Dataset):
             if mask_path.exists()
             else np.ones(len(self.counts), dtype=np.uint8)
         )
-        sample_types_path = self.split_dir / "sample_types.npy"
-        self.sample_types = (
-            np.load(sample_types_path, mmap_mode="r")
-            if sample_types_path.exists()
-            else np.zeros(len(self.counts), dtype=np.uint8)
-        )
         anchor_path = self.split_dir / "anchor_type_codes.npy"
         self.anchor_type_codes = (
             np.load(anchor_path, mmap_mode="r") if anchor_path.exists() else None
@@ -48,7 +42,6 @@ class PauseNetDataset(Dataset):
             len(self.profiles),
             len(self.counts),
             len(self.profile_masks),
-            len(self.sample_types),
         }
         if self.anchor_type_codes is not None:
             lengths.add(len(self.anchor_type_codes))
@@ -68,6 +61,5 @@ class PauseNetDataset(Dataset):
             ),
             "counts": torch.tensor(float(self.counts[index]), dtype=torch.float32),
             "profile_mask": torch.tensor(int(self.profile_masks[index]), dtype=torch.bool),
-            "sample_type": torch.tensor(int(self.sample_types[index]), dtype=torch.uint8),
             "index": torch.tensor(index, dtype=torch.int64),
         }

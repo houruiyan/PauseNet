@@ -44,7 +44,6 @@ gene_id
 gene_name
 transcript_id
 split
-sample_type
 ```
 
 `region_type` can be `TSS`, `5SS`, `3SS`, `TES`, `peak`, or any user-defined
@@ -53,9 +52,9 @@ label. `split` should usually be one of `train`, `validation`, or `test`.
 Example:
 
 ```text
-chrom	start	end	sample_id	score	strand	region_type	gene_id	gene_name	transcript_id	split	sample_type
-chr1	11873	11874	DDX11L1_TSS	0	+	TSS	ENSG00000223972	DDX11L1	ENST00000456328	train	positive
-chr1	29370	29371	WASH7P_TES	0	-	TES	ENSG00000227232	WASH7P	ENST00000488147	test	positive
+chrom	start	end	sample_id	score	strand	region_type	gene_id	gene_name	transcript_id	split
+chr1	11873	11874	DDX11L1_TSS	0	+	TSS	ENSG00000223972	DDX11L1	ENST00000456328	train
+chr1	29370	29371	WASH7P_TES	0	-	TES	ENSG00000227232	WASH7P	ENST00000488147	test
 ```
 
 ## Command
@@ -88,7 +87,6 @@ pausenet_dataset/
     profiles.npy
     counts.npy
     profile_loss_mask.npy
-    sample_types.npy
     manifest.tsv
   validation/
   test/
@@ -154,4 +152,3 @@ For each anchor row:
 5. Reverse-complement negative-strand examples into transcriptional
    orientation.
 6. Save the standard PauseNet arrays and `manifest.tsv`.
-
