@@ -40,8 +40,34 @@ def _require_columns(table: pd.DataFrame, columns: set[str], path: Path) -> None
         raise ValueError(f"{path} is missing required columns: {missing_text}")
 
 
+def _log10_window_density(
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    *,
+    bins: int = 190,
+) -> np.ndarray:
+    """Return the log10 count of the 2D histogram bin containing each point."""
+    if bins < 1:
+        raise ValueError("bins must be at least 1")
+    if x_values.shape != y_values.shape:
+        raise ValueError("x_values and y_values must have the same shape")
+
+    counts, x_edges, y_edges = np.histogram2d(x_values, y_values, bins=bins)
+    x_indices = np.clip(
+        np.searchsorted(x_edges, x_values, side="right") - 1,
+        0,
+        counts.shape[0] - 1,
+    )
+    y_indices = np.clip(
+        np.searchsorted(y_edges, y_values, side="right") - 1,
+        0,
+        counts.shape[1] - 1,
+    )
+    return np.log10(np.maximum(counts[x_indices, y_indices], 1.0))
+
+
 def plot_count_scatter(predictions: pd.DataFrame, output_path: Path) -> None:
-    """Plot observed versus predicted log1p counts as a density hexbin."""
+    """Plot observed versus predicted log1p counts as density-colored points."""
     _require_columns(predictions, {"observed_counts", "predicted_log1p_counts"}, output_path)
     observed = pd.to_numeric(predictions["observed_counts"], errors="coerce").to_numpy()
     predicted = pd.to_numeric(predictions["predicted_log1p_counts"], errors="coerce").to_numpy()
@@ -52,25 +78,38 @@ def plot_count_scatter(predictions: pd.DataFrame, output_path: Path) -> None:
         raise ValueError("At least two finite observed/predicted count pairs are required.")
 
     plt = _load_pyplot()
-    figure, axis = plt.subplots(figsize=(4.1, 3.8), dpi=300)
+    figure, axis = plt.subplots(figsize=(5.0, 4.0), dpi=300)
     maximum = float(max(observed_log1p.max(), predicted_log1p.max()))
     maximum = max(1.0, np.ceil(maximum))
-    density = axis.hexbin(
-        observed_log1p,
-        predicted_log1p,
-        gridsize=65,
-        mincnt=1,
-        bins="log",
+    padding = maximum * 0.025
+    log_density = _log10_window_density(observed_log1p, predicted_log1p)
+    draw_order = np.argsort(log_density, kind="stable")
+    points = axis.scatter(
+        observed_log1p[draw_order],
+        predicted_log1p[draw_order],
+        c=log_density[draw_order],
         cmap="plasma",
-        linewidths=0,
-        extent=(0, maximum, 0, maximum),
+        s=2.5,
+        alpha=0.9,
+        edgecolors="none",
+        rasterized=True,
     )
-    axis.plot((0, maximum), (0, maximum), color="#4A4A4A", linestyle="--", linewidth=1.0, zorder=0)
-    axis.set_xlim(0, maximum)
-    axis.set_ylim(0, maximum)
+    axis.plot(
+        (0, maximum),
+        (0, maximum),
+        color="#666666",
+        linestyle=(0, (4, 3)),
+        linewidth=1.0,
+        zorder=0,
+    )
+    axis.set_xlim(-padding, maximum + padding)
+    axis.set_ylim(-padding, maximum + padding)
     axis.set_aspect("equal", adjustable="box")
-    axis.set_xlabel("Observed log1p(counts)")
-    axis.set_ylabel("Predicted log1p(counts)")
+    axis.set_xlabel("Observed log1p(counts)", fontsize=13)
+    axis.set_ylabel("Predicted log1p(counts)", fontsize=13)
+    axis.tick_params(axis="both", labelsize=10)
+    axis.spines["top"].set_visible(False)
+    axis.spines["right"].set_visible(False)
     axis.text(
         0.04,
         0.96,
@@ -78,12 +117,15 @@ def plot_count_scatter(predictions: pd.DataFrame, output_path: Path) -> None:
         transform=axis.transAxes,
         ha="left",
         va="top",
-        fontsize=9,
+        fontsize=12,
     )
-    colorbar = figure.colorbar(density, ax=axis, pad=0.02, fraction=0.05)
-    colorbar.set_label("log10(bin count)", fontsize=8)
-    colorbar.ax.tick_params(labelsize=8)
-    figure.tight_layout()
+    colorbar_axis = axis.inset_axes([0.50, 0.87, 0.38, 0.055])
+    colorbar = figure.colorbar(points, cax=colorbar_axis, orientation="horizontal")
+    colorbar.ax.set_title("log10(window density)", fontsize=9, pad=2)
+    colorbar.ax.tick_params(axis="x", labelsize=8, length=2.5, pad=1)
+    maximum_density = int(np.floor(float(log_density.max())))
+    colorbar.set_ticks(np.arange(maximum_density + 1, dtype=float))
+    figure.subplots_adjust(left=0.16, right=0.98, bottom=0.16, top=0.98)
     figure.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(figure)
 
