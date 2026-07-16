@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
+import csv
+import gzip
+import json
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
-import pandas as pd
+from numpy.lib.format import open_memmap
 
 
 BASE_TO_CODE = {
@@ -30,10 +32,45 @@ BED_COLUMNS = [
     "transcript_id",
     "split",
 ]
+MINIMAL_BED_COLUMNS = ["chrom", "start", "end", "strand"]
 REVCOMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+MANIFEST_COLUMNS = [
+    "array_index",
+    "sample_id",
+    "chrom",
+    "input_start",
+    "input_end",
+    "output_start",
+    "output_end",
+    "anchor_center",
+    "strand",
+    "gene_id",
+    "gene_name",
+    "transcript_id",
+    "region_type",
+    "cell_line",
+    "assay",
+    "split",
+    "count",
+    "profile_loss_mask",
+]
+ANCHOR_CORE_COLUMNS = {
+    "chrom",
+    "start",
+    "end",
+    "name",
+    "sample_id",
+    "score",
+    "strand",
+    "region_type",
+    "gene_id",
+    "gene_name",
+    "transcript_id",
+    "split",
+}
 
 
-def require_genomics_dependencies():
+def require_genomics_dependencies() -> None:
     try:
         import pyBigWig  # noqa: F401
         from pyfaidx import Fasta  # noqa: F401
@@ -50,10 +87,14 @@ def parse_chrom_list(value: str | None) -> set[str]:
     return {item.strip() for item in value.split(",") if item.strip()}
 
 
+def _open_text(path: Path):
+    return gzip.open(path, "rt") if path.suffix == ".gz" else path.open()
+
+
 def first_data_line(path: Path) -> list[str]:
-    with path.open() as handle:
+    with _open_text(path) as handle:
         for line in handle:
-            line = line.strip()
+            line = line.rstrip("\n\r")
             if line and not line.startswith("#"):
                 return line.split("\t")
     raise ValueError(f"No data rows found in {path}")
@@ -70,22 +111,70 @@ def looks_like_bed_without_header(fields: list[str]) -> bool:
         return False
 
 
-def load_anchor_table(path: str | Path, bed_has_header: bool | None = None) -> pd.DataFrame:
+def anchor_schema(path: str | Path, bed_has_header: bool | None = None) -> tuple[list[str], bool]:
     path = Path(path)
+    fields = first_data_line(path)
     if bed_has_header is None:
-        bed_has_header = not looks_like_bed_without_header(first_data_line(path))
+        bed_has_header = not looks_like_bed_without_header(fields)
 
     if bed_has_header:
-        anchors = pd.read_csv(path, sep="\t", comment="#")
+        columns = fields
+    elif len(fields) == 4:
+        columns = MINIMAL_BED_COLUMNS
+    elif len(fields) >= 6:
+        if len(fields) > len(BED_COLUMNS):
+            raise ValueError(
+                "Headerless anchors may contain at most 11 BED-like columns; "
+                "use a header for additional metadata."
+            )
+        columns = BED_COLUMNS[: len(fields)]
     else:
-        anchors = pd.read_csv(path, sep="\t", comment="#", header=None)
-        anchors.columns = BED_COLUMNS[: anchors.shape[1]]
+        raise ValueError(
+            "Headerless anchors must have either four columns "
+            "(chrom, start, end, strand) or a BED6-like layout."
+        )
 
     required = {"chrom", "start", "end", "strand"}
-    missing = required.difference(anchors.columns)
+    missing = required.difference(columns)
     if missing:
         raise ValueError(f"Anchor BED is missing required columns: {sorted(missing)}")
+    return columns, bool(bed_has_header)
 
+
+def iter_anchor_rows(
+    path: str | Path,
+    bed_has_header: bool | None = None,
+) -> tuple[list[str], Iterator[dict[str, str]]]:
+    path = Path(path)
+    columns, has_header = anchor_schema(path, bed_has_header=bed_has_header)
+
+    def rows() -> Iterator[dict[str, str]]:
+        saw_header = False
+        with _open_text(path) as handle:
+            for line_number, line in enumerate(handle, start=1):
+                line = line.rstrip("\n\r")
+                if not line or line.startswith("#"):
+                    continue
+                if has_header and not saw_header:
+                    saw_header = True
+                    continue
+                fields = line.split("\t")
+                if len(fields) != len(columns):
+                    raise ValueError(
+                        f"Anchor row {line_number} has {len(fields)} fields; "
+                        f"expected {len(columns)}."
+                    )
+                yield dict(zip(columns, fields, strict=True))
+
+    return columns, rows()
+
+
+def load_anchor_table(path: str | Path, bed_has_header: bool | None = None):
+    """Load anchors into a pandas DataFrame for small interactive use cases."""
+    import pandas as pd
+
+    columns, rows = iter_anchor_rows(path, bed_has_header=bed_has_header)
+    anchors = pd.DataFrame.from_records(rows, columns=columns)
     anchors["start"] = anchors["start"].astype(int)
     anchors["end"] = anchors["end"].astype(int)
     anchors["strand"] = anchors["strand"].astype(str)
@@ -113,16 +202,17 @@ def bigwig_values(bw, chrom: str, start: int, end: int, preserve_signed_signal: 
 
 
 def assign_split(
-    row: pd.Series,
+    row: Mapping[str, str],
     split_column: str,
     train_chroms: set[str],
     validation_chroms: set[str],
     test_chroms: set[str],
     default_split: str,
 ) -> str:
-    if split_column in row and pd.notna(row[split_column]):
-        return str(row[split_column])
-    chrom = str(row["chrom"])
+    explicit_split = row.get(split_column, "").strip()
+    if explicit_split:
+        return explicit_split
+    chrom = row["chrom"]
     if chrom in train_chroms:
         return "train"
     if chrom in validation_chroms:
@@ -132,23 +222,122 @@ def assign_split(
     return default_split
 
 
-def save_split(output_dir: Path, split_name: str, rows: list[dict]) -> None:
-    split_dir = output_dir / split_name
-    split_dir.mkdir(parents=True, exist_ok=True)
+def anchor_geometry(
+    row: Mapping[str, str],
+    chrom_sizes: Mapping[str, int],
+    input_length: int,
+    output_length: int,
+) -> dict[str, int | str] | None:
+    chrom = row.get("chrom", "")
+    strand = row.get("strand", "")
+    if strand not in {"+", "-"} or chrom not in chrom_sizes:
+        return None
+    try:
+        anchor_center = (int(row["start"]) + int(row["end"])) // 2
+    except (KeyError, TypeError, ValueError):
+        return None
 
-    np.save(split_dir / "sequence_codes.npy", np.stack([row["sequence_codes"] for row in rows]))
-    np.save(split_dir / "profiles.npy", np.stack([row["profile"] for row in rows]).astype(np.float32))
-    np.save(split_dir / "counts.npy", np.asarray([row["count"] for row in rows], dtype=np.float32))
-    np.save(
-        split_dir / "profile_loss_mask.npy",
-        np.asarray([row["profile_loss_mask"] for row in rows], dtype=np.uint8),
+    context = (input_length - output_length) // 2
+    output_start = anchor_center - output_length // 2
+    output_end = output_start + output_length
+    input_start = output_start - context
+    input_end = input_start + input_length
+    if input_start < 0 or input_end > chrom_sizes[chrom]:
+        return None
+    return {
+        "chrom": chrom,
+        "strand": strand,
+        "anchor_center": anchor_center,
+        "output_start": output_start,
+        "output_end": output_end,
+        "input_start": input_start,
+        "input_end": input_end,
+    }
+
+
+def _sample_id(row: Mapping[str, str], geometry: Mapping[str, int | str]) -> str:
+    sample_id = row.get("sample_id", "") or row.get("name", "")
+    if sample_id:
+        return sample_id
+    return (
+        f"{geometry['chrom']}:{geometry['output_start']}-"
+        f"{geometry['output_end']}:{geometry['strand']}"
     )
-    manifest_rows = []
+
+
+def _extra_anchor_columns(columns: Iterable[str]) -> list[str]:
+    return [
+        column
+        for column in columns
+        if column not in ANCHOR_CORE_COLUMNS and column not in MANIFEST_COLUMNS
+    ]
+
+
+def _manifest_record(
+    row: Mapping[str, str],
+    geometry: Mapping[str, int | str],
+    index: int,
+    split: str,
+    count: float,
+    profile_min_count: float,
+    cell_line: str,
+    assay: str,
+    extra_columns: Iterable[str],
+) -> dict[str, str | int | float]:
+    record: dict[str, str | int | float] = {
+        "array_index": index,
+        "sample_id": _sample_id(row, geometry),
+        "chrom": geometry["chrom"],
+        "input_start": geometry["input_start"],
+        "input_end": geometry["input_end"],
+        "output_start": geometry["output_start"],
+        "output_end": geometry["output_end"],
+        "anchor_center": geometry["anchor_center"],
+        "strand": geometry["strand"],
+        "gene_id": row.get("gene_id", ""),
+        "gene_name": row.get("gene_name", ""),
+        "transcript_id": row.get("transcript_id", ""),
+        "region_type": row.get("region_type", "region") or "region",
+        "cell_line": cell_line,
+        "assay": assay,
+        "split": split,
+        "count": count,
+        "profile_loss_mask": int(count >= profile_min_count),
+    }
+    for column in extra_columns:
+        record[column] = row.get(column, "")
+    return record
+
+
+def _count_valid_anchors(
+    anchors_bed: str | Path,
+    bed_has_header: bool | None,
+    chrom_sizes: Mapping[str, int],
+    input_length: int,
+    output_length: int,
+    split_column: str,
+    train_chroms: set[str],
+    validation_chroms: set[str],
+    test_chroms: set[str],
+    default_split: str,
+) -> tuple[dict[str, int], int, list[str]]:
+    columns, rows = iter_anchor_rows(anchors_bed, bed_has_header=bed_has_header)
+    counts: dict[str, int] = {}
+    skipped = 0
     for row in rows:
-        manifest_rows.append(
-            {key: value for key, value in row.items() if key not in {"sequence_codes", "profile"}}
+        if anchor_geometry(row, chrom_sizes, input_length, output_length) is None:
+            skipped += 1
+            continue
+        split = assign_split(
+            row,
+            split_column=split_column,
+            train_chroms=train_chroms,
+            validation_chroms=validation_chroms,
+            test_chroms=test_chroms,
+            default_split=default_split,
         )
-    pd.DataFrame(manifest_rows).to_csv(split_dir / "manifest.tsv", sep="\t", index=False)
+        counts[split] = counts.get(split, 0) + 1
+    return counts, skipped, _extra_anchor_columns(columns)
 
 
 def prepare_bigwig_dataset(
@@ -170,110 +359,149 @@ def prepare_bigwig_dataset(
     cell_line: str = "",
     assay: str = "",
 ) -> dict[str, int]:
+    """Build a dataset with a two-pass, memory-bounded anchor scan."""
     require_genomics_dependencies()
 
     import pyBigWig
     from pyfaidx import Fasta
 
-    if (input_length - output_length) % 2 != 0:
-        raise ValueError("input_length - output_length must be even")
-    context = (input_length - output_length) // 2
+    if input_length < output_length or (input_length - output_length) % 2:
+        raise ValueError("input_length must exceed output_length by an even number")
 
-    anchors = load_anchor_table(anchors_bed, bed_has_header=bed_has_header)
+    train_chroms = set(train_chroms)
+    validation_chroms = set(validation_chroms)
+    test_chroms = set(test_chroms)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     genome = Fasta(str(fasta_path), sequence_always_upper=True)
+    chrom_sizes = {chrom: len(genome[chrom]) for chrom in genome.keys()}
+    split_counts, skipped, extra_columns = _count_valid_anchors(
+        anchors_bed=anchors_bed,
+        bed_has_header=bed_has_header,
+        chrom_sizes=chrom_sizes,
+        input_length=input_length,
+        output_length=output_length,
+        split_column=split_column,
+        train_chroms=train_chroms,
+        validation_chroms=validation_chroms,
+        test_chroms=test_chroms,
+        default_split=default_split,
+    )
+    if not split_counts:
+        genome.close()
+        raise ValueError("No valid anchors remain after coordinate validation")
+
+    fieldnames = [*MANIFEST_COLUMNS, *extra_columns]
+    writers: dict[str, dict] = {}
+    for split, size in split_counts.items():
+        split_dir = output_dir / split
+        split_dir.mkdir(parents=True, exist_ok=True)
+        manifest_handle = (split_dir / "manifest.tsv").open("w", newline="")
+        manifest_writer = csv.DictWriter(manifest_handle, fieldnames=fieldnames, delimiter="\t")
+        manifest_writer.writeheader()
+        writers[split] = {
+            "sequence_codes": open_memmap(
+                split_dir / "sequence_codes.npy", mode="w+", dtype=np.uint8, shape=(size, input_length)
+            ),
+            "profiles": open_memmap(
+                split_dir / "profiles.npy", mode="w+", dtype=np.float32, shape=(size, output_length)
+            ),
+            "counts": open_memmap(split_dir / "counts.npy", mode="w+", dtype=np.float32, shape=(size,)),
+            "profile_loss_mask": open_memmap(
+                split_dir / "profile_loss_mask.npy", mode="w+", dtype=np.uint8, shape=(size,)
+            ),
+            "manifest_handle": manifest_handle,
+            "manifest_writer": manifest_writer,
+            "index": 0,
+        }
+
     pos_bw = pyBigWig.open(str(pos_bw_path))
     neg_bw = pyBigWig.open(str(neg_bw_path))
+    try:
+        _, rows = iter_anchor_rows(anchors_bed, bed_has_header=bed_has_header)
+        for row in rows:
+            geometry = anchor_geometry(row, chrom_sizes, input_length, output_length)
+            if geometry is None:
+                continue
+            split = assign_split(
+                row,
+                split_column=split_column,
+                train_chroms=train_chroms,
+                validation_chroms=validation_chroms,
+                test_chroms=test_chroms,
+                default_split=default_split,
+            )
+            writer = writers[split]
+            index = writer["index"]
+            seq = genome[str(geometry["chrom"])][
+                int(geometry["input_start"]):int(geometry["input_end"])
+            ].seq
+            if geometry["strand"] == "-":
+                seq = reverse_complement(seq)
+            sequence_codes = encode_sequence(seq)
+            if len(sequence_codes) != input_length:
+                raise RuntimeError(f"Unexpected sequence length at {_sample_id(row, geometry)}")
 
-    splits: dict[str, list[dict]] = defaultdict(list)
-    skipped = 0
+            bw = pos_bw if geometry["strand"] == "+" else neg_bw
+            profile = bigwig_values(
+                bw,
+                str(geometry["chrom"]),
+                int(geometry["output_start"]),
+                int(geometry["output_end"]),
+                preserve_signed_signal=preserve_signed_signal,
+            )
+            if len(profile) != output_length:
+                raise RuntimeError(f"Unexpected profile length at {_sample_id(row, geometry)}")
+            if geometry["strand"] == "-":
+                profile = profile[::-1].copy()
+            count = float(profile.sum())
 
-    for row_index, row in anchors.iterrows():
-        chrom = str(row["chrom"])
-        strand = str(row["strand"])
-        if strand not in {"+", "-"}:
-            skipped += 1
-            continue
-        if chrom not in genome:
-            skipped += 1
-            continue
+            writer["sequence_codes"][index] = sequence_codes
+            writer["profiles"][index] = profile
+            writer["counts"][index] = count
+            writer["profile_loss_mask"][index] = int(count >= profile_min_count)
+            writer["manifest_writer"].writerow(
+                _manifest_record(
+                    row=row,
+                    geometry=geometry,
+                    index=index,
+                    split=split,
+                    count=count,
+                    profile_min_count=profile_min_count,
+                    cell_line=cell_line,
+                    assay=assay,
+                    extra_columns=extra_columns,
+                )
+            )
+            writer["index"] += 1
+    finally:
+        pos_bw.close()
+        neg_bw.close()
+        genome.close()
+        for writer in writers.values():
+            writer["manifest_handle"].close()
+            for key in ("sequence_codes", "profiles", "counts", "profile_loss_mask"):
+                writer[key].flush()
 
-        anchor_center = int((int(row["start"]) + int(row["end"])) // 2)
-        output_start = anchor_center - output_length // 2
-        output_end = output_start + output_length
-        input_start = output_start - context
-        input_end = input_start + input_length
+    for split, writer in writers.items():
+        if writer["index"] != split_counts[split]:
+            raise RuntimeError(
+                f"Anchor count changed between passes for {split}: "
+                f"expected {split_counts[split]}, wrote {writer['index']}"
+            )
 
-        if input_start < 0 or input_end > len(genome[chrom]):
-            skipped += 1
-            continue
-
-        seq = genome[chrom][input_start:input_end].seq
-        if strand == "-":
-            seq = reverse_complement(seq)
-        sequence_codes = encode_sequence(seq)
-
-        bw = pos_bw if strand == "+" else neg_bw
-        profile = bigwig_values(
-            bw,
-            chrom,
-            output_start,
-            output_end,
-            preserve_signed_signal=preserve_signed_signal,
-        )
-        if len(profile) != output_length:
-            skipped += 1
-            continue
-        if strand == "-":
-            profile = profile[::-1].copy()
-
-        count = float(profile.sum())
-        split = assign_split(
-            row,
-            split_column=split_column,
-            train_chroms=set(train_chroms),
-            validation_chroms=set(validation_chroms),
-            test_chroms=set(test_chroms),
-            default_split=default_split,
-        )
-
-        sample_id = row.get("sample_id", row.get("name", f"{chrom}:{output_start}-{output_end}:{strand}"))
-        region_type = row.get("region_type", "region")
-        splits[split].append(
-            {
-                "sample_id": sample_id,
-                "chrom": chrom,
-                "input_start": input_start,
-                "input_end": input_end,
-                "output_start": output_start,
-                "output_end": output_end,
-                "anchor_center": anchor_center,
-                "strand": strand,
-                "gene_id": row.get("gene_id", ""),
-                "gene_name": row.get("gene_name", ""),
-                "transcript_id": row.get("transcript_id", ""),
-                "region_type": region_type,
-                "cell_line": cell_line,
-                "assay": assay,
-                "split": split,
-                "count": count,
-                "profile_loss_mask": int(count >= profile_min_count),
-                "sequence_codes": sequence_codes,
-                "profile": profile.astype(np.float32),
-            }
-        )
-
-    pos_bw.close()
-    neg_bw.close()
-    genome.close()
-
-    summary = {"skipped": skipped}
-    for split_name, rows in sorted(splits.items()):
-        save_split(output_dir, split_name, rows)
-        summary[split_name] = len(rows)
-    return summary
+    summary = {
+        "input_length": input_length,
+        "output_length": output_length,
+        "anchors_bed": str(anchors_bed),
+        "skipped": skipped,
+        "splits": split_counts,
+    }
+    with (output_dir / "dataset_summary.json").open("w") as handle:
+        json.dump(summary, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    return {"skipped": skipped, **split_counts}
 
 
 def add_prepare_bigwig_args(parser: argparse.ArgumentParser) -> None:
