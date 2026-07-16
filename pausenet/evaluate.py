@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .dataset import PauseNetDataset
-from .metrics import profile_similarity_summary
+from .metrics import PROFILE_COUNT_THRESHOLDS, profile_similarity_by_count_threshold
 from .model import PauseNet, PauseNetConfig
 from .train import model_config_from_dict, run_epoch
 
@@ -34,6 +34,7 @@ def evaluate_checkpoint(
     batch_size: int = 256,
     num_workers: int = 4,
     save_predictions: bool = True,
+    profile_count_thresholds: tuple[int, ...] = PROFILE_COUNT_THRESHOLDS,
 ) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -60,14 +61,24 @@ def evaluate_checkpoint(
     metrics["n"] = int(len(dataset))
     with (output_dir / f"{split}_metrics.json").open("w") as handle:
         json.dump(metrics, handle, indent=2)
-    similarity = pd.DataFrame(
-        profile_similarity_summary(
+    similarity_by_count = pd.DataFrame(
+        profile_similarity_by_count_threshold(
             outputs["observed_profiles"],
             outputs["predicted_profiles"],
             outputs["profile_masks"],
+            observed_counts=outputs["observed_counts"],
+            count_thresholds=profile_count_thresholds,
         )
     )
+    similarity = similarity_by_count.loc[
+        similarity_by_count["count_threshold"] == min(profile_count_thresholds)
+    ].drop(columns="count_threshold")
     similarity.to_csv(output_dir / f"{split}_profile_similarity.tsv", sep="\t", index=False)
+    similarity_by_count.to_csv(
+        output_dir / f"{split}_profile_similarity_by_count_threshold.tsv",
+        sep="\t",
+        index=False,
+    )
     if save_predictions:
         table = pd.DataFrame(
             {
@@ -94,6 +105,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--no-save-predictions", action="store_true")
+    parser.add_argument(
+        "--profile-count-thresholds",
+        type=int,
+        nargs="+",
+        default=list(PROFILE_COUNT_THRESHOLDS),
+        metavar="COUNT",
+        help="Observed count thresholds for profile-similarity summaries.",
+    )
     return parser.parse_args()
 
 
@@ -108,6 +127,7 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         save_predictions=not args.no_save_predictions,
+        profile_count_thresholds=tuple(args.profile_count_thresholds),
     )
     print(json.dumps(metrics, indent=2))
 

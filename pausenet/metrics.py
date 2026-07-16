@@ -7,6 +7,7 @@ from scipy.stats import pearsonr
 
 EPSILON = 1e-8
 PROFILE_RESOLUTIONS = (1, 5, 10, 20)
+PROFILE_COUNT_THRESHOLDS = (0, 100, 200, 500)
 
 
 def safe_pearson(observed, predicted) -> float:
@@ -66,6 +67,35 @@ def profile_similarity_summary(
     observed profile. The random baseline permutes positions within each
     observed profile, retaining its total signal and value distribution.
     """
+    rows = profile_similarity_by_count_threshold(
+        observed_profiles,
+        predicted_profiles,
+        profile_masks,
+        resolutions=resolutions,
+        count_thresholds=(0,),
+        seed=seed,
+    )
+    return [
+        {key: value for key, value in row.items() if key != "count_threshold"}
+        for row in rows
+    ]
+
+
+def profile_similarity_by_count_threshold(
+    observed_profiles: np.ndarray,
+    predicted_profiles: np.ndarray,
+    profile_masks: np.ndarray,
+    observed_counts: np.ndarray | None = None,
+    resolutions: tuple[int, ...] = PROFILE_RESOLUTIONS,
+    count_thresholds: tuple[int, ...] = PROFILE_COUNT_THRESHOLDS,
+    seed: int = 2025,
+) -> list[dict[str, float | int | str]]:
+    """Summarize profile similarity after observed-count filtering.
+
+    Pseudoreplicates and random profiles are generated once before applying
+    the count thresholds. Consequently, a window that is present at multiple
+    thresholds keeps the same reference profiles in every panel.
+    """
     observed = np.asarray(observed_profiles, dtype=np.float64)
     predicted = np.asarray(predicted_profiles, dtype=np.float64)
     masks = np.asarray(profile_masks, dtype=bool)
@@ -73,19 +103,35 @@ def profile_similarity_summary(
         raise ValueError("Observed and predicted profiles must have the same 2D shape.")
     if len(masks) != len(observed):
         raise ValueError("Profile masks must contain one value per profile.")
+    if observed_counts is None:
+        counts = observed.sum(axis=1)
+    else:
+        counts = np.asarray(observed_counts, dtype=np.float64)
+        if counts.ndim != 1 or len(counts) != len(observed):
+            raise ValueError("Observed counts must contain one value per profile.")
+
+    thresholds = tuple(dict.fromkeys(int(value) for value in count_thresholds))
+    if not thresholds:
+        raise ValueError("At least one count threshold is required.")
+    if any(value < 0 for value in thresholds):
+        raise ValueError("Count thresholds must be non-negative integers.")
 
     valid = masks & np.isfinite(observed).all(axis=1) & np.isfinite(predicted).all(axis=1)
+    valid &= np.isfinite(counts) & (counts >= 0)
     valid &= observed.sum(axis=1) > 0
     observed = np.maximum(observed[valid], 0.0)
     predicted = np.maximum(predicted[valid], 0.0)
+    observed_counts_valid = counts[valid]
     if len(observed) == 0:
         return [
             {
+                "count_threshold": threshold,
                 "comparison": comparison,
                 "resolution_bp": resolution,
                 "similarity_1_minus_jsd": float("nan"),
                 "n": 0,
             }
+            for threshold in thresholds
             for comparison in ("Pseudoreplicates", "PauseNet", "Random profile")
             for resolution in resolutions
         ]
@@ -105,18 +151,23 @@ def profile_similarity_summary(
         "Random profile": (observed, random_profiles),
     }
     rows = []
-    for comparison, (left, right) in comparisons.items():
-        comparison_valid = (left.sum(axis=1) > 0) & (right.sum(axis=1) > 0)
-        for resolution in resolutions:
-            distances = js_distance_rows(left[comparison_valid], right[comparison_valid], resolution)
-            rows.append(
-                {
-                    "comparison": comparison,
-                    "resolution_bp": resolution,
-                    "similarity_1_minus_jsd": float(1.0 - np.mean(distances))
-                    if len(distances)
-                    else float("nan"),
-                    "n": int(comparison_valid.sum()),
-                }
-            )
+    for threshold in thresholds:
+        threshold_valid = observed_counts_valid >= threshold
+        for comparison, (left, right) in comparisons.items():
+            comparison_valid = threshold_valid & (left.sum(axis=1) > 0) & (right.sum(axis=1) > 0)
+            for resolution in resolutions:
+                distances = js_distance_rows(
+                    left[comparison_valid], right[comparison_valid], resolution
+                )
+                rows.append(
+                    {
+                        "count_threshold": threshold,
+                        "comparison": comparison,
+                        "resolution_bp": resolution,
+                        "similarity_1_minus_jsd": float(1.0 - np.mean(distances))
+                        if len(distances)
+                        else float("nan"),
+                        "n": int(comparison_valid.sum()),
+                    }
+                )
     return rows

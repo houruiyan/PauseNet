@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from .evaluate import evaluate_checkpoint
+from .evaluate import PROFILE_COUNT_THRESHOLDS, evaluate_checkpoint
 from .prepare_bigwig import add_prepare_bigwig_args, run_prepare_bigwig_from_args
 from .train import load_config, train_from_config
 from .visualize import add_visualize_args, visualize_evaluation
@@ -26,6 +26,14 @@ def main() -> None:
     eval_parser.add_argument("--batch-size", type=int, default=256)
     eval_parser.add_argument("--num-workers", type=int, default=4)
     eval_parser.add_argument("--no-save-predictions", action="store_true")
+    eval_parser.add_argument(
+        "--profile-count-thresholds",
+        type=int,
+        nargs="+",
+        default=list(PROFILE_COUNT_THRESHOLDS),
+        metavar="COUNT",
+        help="Observed count thresholds for profile-similarity summaries.",
+    )
 
     prepare_parser = subparsers.add_parser(
         "prepare-bigwig",
@@ -53,6 +61,7 @@ def main() -> None:
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             save_predictions=not args.no_save_predictions,
+            profile_count_thresholds=tuple(args.profile_count_thresholds),
         )
     elif args.command == "prepare-bigwig":
         run_prepare_bigwig_from_args(args)

@@ -92,6 +92,10 @@ def plot_profile_similarity(similarity: pd.DataFrame, output_path: Path) -> None
     """Plot mean 1-JSD over the supported profile resolutions."""
     required = {"comparison", "resolution_bp", "similarity_1_minus_jsd"}
     _require_columns(similarity, required, output_path)
+    if "count_threshold" in similarity.columns:
+        plot_profile_similarity_by_count_threshold(similarity, output_path)
+        return
+
     plt = _load_pyplot()
     figure, axis = plt.subplots(figsize=(4.8, 3.8), dpi=300)
     for comparison in COMPARISON_ORDER:
@@ -125,6 +129,92 @@ def plot_profile_similarity(similarity: pd.DataFrame, output_path: Path) -> None
     plt.close(figure)
 
 
+def plot_profile_similarity_by_count_threshold(
+    similarity: pd.DataFrame, output_path: Path
+) -> None:
+    """Plot one profile-similarity panel per observed count threshold."""
+    required = {
+        "count_threshold",
+        "comparison",
+        "resolution_bp",
+        "similarity_1_minus_jsd",
+        "n",
+    }
+    _require_columns(similarity, required, output_path)
+    table = similarity.copy()
+    for column in ("count_threshold", "resolution_bp", "similarity_1_minus_jsd", "n"):
+        table[column] = pd.to_numeric(table[column], errors="coerce")
+    table = table.dropna(subset=["count_threshold", "resolution_bp"])
+    thresholds = sorted(int(value) for value in table["count_threshold"].unique())
+    if not thresholds:
+        raise ValueError("At least one finite count threshold is required.")
+
+    plt = _load_pyplot()
+    figure, axes = plt.subplots(
+        1,
+        len(thresholds),
+        figsize=(2.55 * len(thresholds), 2.8),
+        dpi=300,
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+    axes = axes.ravel()
+    legend_handles = []
+    legend_labels = []
+    for axis, threshold in zip(axes, thresholds):
+        threshold_rows = table.loc[table["count_threshold"] == threshold]
+        panel_n = threshold_rows.loc[
+            threshold_rows["comparison"] == "PauseNet", "n"
+        ].dropna()
+        if panel_n.empty:
+            panel_n = threshold_rows["n"].dropna()
+        n_text = int(panel_n.iloc[0]) if not panel_n.empty else 0
+        for comparison in COMPARISON_ORDER:
+            rows = threshold_rows.loc[
+                threshold_rows["comparison"] == comparison
+            ].dropna(subset=["resolution_bp", "similarity_1_minus_jsd"])
+            rows = rows.sort_values("resolution_bp")
+            if rows.empty:
+                continue
+            (line,) = axis.plot(
+                rows["resolution_bp"],
+                rows["similarity_1_minus_jsd"],
+                color=COMPARISON_COLORS[comparison],
+                marker="o",
+                markersize=4.5,
+                linewidth=1.8,
+                label=comparison,
+            )
+            if comparison not in legend_labels:
+                legend_handles.append(line)
+                legend_labels.append(comparison)
+        axis.set_title(f"count >= {threshold:,}\nn={n_text:,}", fontsize=9, pad=5)
+        axis.set_xticks((1, 5, 10, 20))
+        axis.set_xlim(0.5, 20.5)
+        axis.set_ylim(0, 1)
+        axis.spines["top"].set_visible(False)
+        axis.spines["right"].set_visible(False)
+
+    axes[0].set_ylabel("Profile similarity (1 - JSD)")
+    figure.supxlabel("Resolution (bp)", y=0.14)
+    if legend_handles:
+        figure.legend(
+            legend_handles,
+            legend_labels,
+            frameon=False,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.01),
+            ncol=len(legend_labels),
+            handlelength=1.8,
+            columnspacing=1.2,
+            handletextpad=0.4,
+        )
+    figure.subplots_adjust(left=0.075, right=0.99, top=0.78, bottom=0.28, wspace=0.34)
+    figure.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(figure)
+
+
 def visualize_evaluation(
     evaluation_dir: str | Path,
     split: str = "test",
@@ -137,20 +227,27 @@ def visualize_evaluation(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     predictions_path = evaluation_dir / f"{split}_predictions.tsv"
+    threshold_similarity_path = (
+        evaluation_dir / f"{split}_profile_similarity_by_count_threshold.tsv"
+    )
     similarity_path = evaluation_dir / f"{split}_profile_similarity.tsv"
     if not predictions_path.exists():
         raise FileNotFoundError(
             f"Missing {predictions_path}. Re-run `pausenet evaluate` without `--no-save-predictions`."
         )
-    if not similarity_path.exists():
+    if not threshold_similarity_path.exists() and not similarity_path.exists():
         raise FileNotFoundError(
-            f"Missing {similarity_path}. Re-run `pausenet evaluate` to create profile similarity results."
+            "Missing profile-similarity results. Re-run `pausenet evaluate` "
+            "to create them."
         )
 
     count_path = output_dir / f"{split}_count_scatter.{image_format}"
     profile_path = output_dir / f"{split}_profile_similarity.{image_format}"
     plot_count_scatter(pd.read_csv(predictions_path, sep="\t"), count_path)
-    plot_profile_similarity(pd.read_csv(similarity_path, sep="\t"), profile_path)
+    selected_similarity_path = (
+        threshold_similarity_path if threshold_similarity_path.exists() else similarity_path
+    )
+    plot_profile_similarity(pd.read_csv(selected_similarity_path, sep="\t"), profile_path)
     return count_path, profile_path
 
 
