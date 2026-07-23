@@ -227,6 +227,7 @@ def anchor_geometry(
     chrom_sizes: Mapping[str, int],
     input_length: int,
     output_length: int,
+    signal_chrom_sizes: Mapping[str, int] | None = None,
 ) -> dict[str, int | str] | None:
     chrom = row.get("chrom", "")
     strand = row.get("strand", "")
@@ -244,6 +245,14 @@ def anchor_geometry(
     input_end = input_start + input_length
     if input_start < 0 or input_end > chrom_sizes[chrom]:
         return None
+    if signal_chrom_sizes is not None:
+        signal_chrom_size = signal_chrom_sizes.get(chrom)
+        if (
+            signal_chrom_size is None
+            or output_start < 0
+            or output_end > signal_chrom_size
+        ):
+            return None
     return {
         "chrom": chrom,
         "strand": strand,
@@ -313,6 +322,8 @@ def _count_valid_anchors(
     anchors_bed: str | Path,
     bed_has_header: bool | None,
     chrom_sizes: Mapping[str, int],
+    pos_chrom_sizes: Mapping[str, int],
+    neg_chrom_sizes: Mapping[str, int],
     input_length: int,
     output_length: int,
     split_column: str,
@@ -325,7 +336,19 @@ def _count_valid_anchors(
     counts: dict[str, int] = {}
     skipped = 0
     for row in rows:
-        if anchor_geometry(row, chrom_sizes, input_length, output_length) is None:
+        signal_chrom_sizes = (
+            pos_chrom_sizes if row.get("strand") == "+" else neg_chrom_sizes
+        )
+        if (
+            anchor_geometry(
+                row,
+                chrom_sizes,
+                input_length,
+                output_length,
+                signal_chrom_sizes=signal_chrom_sizes,
+            )
+            is None
+        ):
             skipped += 1
             continue
         split = assign_split(
@@ -376,10 +399,16 @@ def prepare_bigwig_dataset(
 
     genome = Fasta(str(fasta_path), sequence_always_upper=True)
     chrom_sizes = {chrom: len(genome[chrom]) for chrom in genome.keys()}
+    with pyBigWig.open(str(pos_bw_path)) as pos_bw_header:
+        pos_chrom_sizes = pos_bw_header.chroms()
+    with pyBigWig.open(str(neg_bw_path)) as neg_bw_header:
+        neg_chrom_sizes = neg_bw_header.chroms()
     split_counts, skipped, extra_columns = _count_valid_anchors(
         anchors_bed=anchors_bed,
         bed_has_header=bed_has_header,
         chrom_sizes=chrom_sizes,
+        pos_chrom_sizes=pos_chrom_sizes,
+        neg_chrom_sizes=neg_chrom_sizes,
         input_length=input_length,
         output_length=output_length,
         split_column=split_column,
@@ -421,7 +450,16 @@ def prepare_bigwig_dataset(
     try:
         _, rows = iter_anchor_rows(anchors_bed, bed_has_header=bed_has_header)
         for row in rows:
-            geometry = anchor_geometry(row, chrom_sizes, input_length, output_length)
+            signal_chrom_sizes = (
+                pos_chrom_sizes if row.get("strand") == "+" else neg_chrom_sizes
+            )
+            geometry = anchor_geometry(
+                row,
+                chrom_sizes,
+                input_length,
+                output_length,
+                signal_chrom_sizes=signal_chrom_sizes,
+            )
             if geometry is None:
                 continue
             split = assign_split(

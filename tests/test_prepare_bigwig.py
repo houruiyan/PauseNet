@@ -48,6 +48,26 @@ class AnchorTableTests(unittest.TestCase):
         self.assertEqual(geometry["input_start"], 9443)
         self.assertEqual(geometry["input_end"], 11557)
 
+    def test_anchor_geometry_rejects_chromosome_missing_from_signal_track(self):
+        geometry = prepare_bigwig.anchor_geometry(
+            {"chrom": "chrY", "start": "10000", "end": "10001", "strand": "+"},
+            {"chrY": 50000},
+            input_length=2114,
+            output_length=1000,
+            signal_chrom_sizes={"chr1": 50000},
+        )
+        self.assertIsNone(geometry)
+
+    def test_anchor_geometry_rejects_profile_beyond_signal_track_bounds(self):
+        geometry = prepare_bigwig.anchor_geometry(
+            {"chrom": "chr1", "start": "10000", "end": "11000", "strand": "+"},
+            {"chr1": 50000},
+            input_length=2114,
+            output_length=1000,
+            signal_chrom_sizes={"chr1": 10500},
+        )
+        self.assertIsNone(geometry)
+
     def test_explicit_split_takes_precedence_over_chromosome_rules(self):
         split = prepare_bigwig.assign_split(
             {"chrom": "chr1", "split": "test"},
