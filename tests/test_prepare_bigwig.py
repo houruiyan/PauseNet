@@ -25,13 +25,28 @@ class AnchorTableTests(unittest.TestCase):
             self.assertEqual(next(rows)["anchor_type"], "TSS")
             rows.close()
 
-    def test_four_column_bed_maps_the_fourth_field_to_strand(self):
+    def test_standard_bed4_reports_that_strand_is_required(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "anchors.bed"
-            path.write_text("chr1\t1000\t2000\t-\n")
+            path.write_text("chr1\t1000\t2000\tanchor_1\n")
+            with self.assertRaisesRegex(
+                ValueError,
+                "Standard BED4 does not contain strand information",
+            ):
+                prepare_bigwig.anchor_schema(path)
+
+    def test_standard_bed6_reads_name_score_and_strand(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "anchors.bed"
+            path.write_text("chr1\t1000\t2000\tanchor_1\t0\t-\n")
             columns, rows = prepare_bigwig.iter_anchor_rows(path)
-            self.assertEqual(columns, ["chrom", "start", "end", "strand"])
-            self.assertEqual(next(rows)["strand"], "-")
+            self.assertEqual(
+                columns,
+                ["chrom", "start", "end", "sample_id", "score", "strand"],
+            )
+            row = next(rows)
+            self.assertEqual(row["sample_id"], "anchor_1")
+            self.assertEqual(row["strand"], "-")
             rows.close()
 
     def test_anchor_geometry_uses_the_existing_output_interval(self):

@@ -32,7 +32,7 @@ BED_COLUMNS = [
     "transcript_id",
     "split",
 ]
-MINIMAL_BED_COLUMNS = ["chrom", "start", "end", "strand"]
+MINIMAL_BED_COLUMNS = ["chrom", "start", "end", "name"]
 REVCOMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 MANIFEST_COLUMNS = [
     "array_index",
@@ -131,12 +131,19 @@ def anchor_schema(path: str | Path, bed_has_header: bool | None = None) -> tuple
     else:
         raise ValueError(
             "Headerless anchors must have either four columns "
-            "(chrom, start, end, strand) or a BED6-like layout."
+            "(chrom, start, end, name) or a BED6-like layout."
         )
 
     required = {"chrom", "start", "end", "strand"}
     missing = required.difference(columns)
     if missing:
+        if columns == MINIMAL_BED_COLUMNS and missing == {"strand"}:
+            raise ValueError(
+                "Standard BED4 does not contain strand information. "
+                "PauseNet requires strand; use standard BED6 "
+                "(chrom, start, end, name, score, strand) or a headered TSV "
+                "with a strand column."
+            )
         raise ValueError(f"Anchor BED is missing required columns: {sorted(missing)}")
     return columns, bool(bed_has_header)
 
