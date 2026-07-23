@@ -128,7 +128,13 @@ pausenet train --config configs/hek293t_netseq.yaml
 
 The same command can be used for NET-seq, GRO-seq, PRO-seq or other
 strand-oriented profile assays once the data are converted into the standard
-format.
+format. The example configuration enables a `reduce_on_plateau` learning-rate
+scheduler. Its `monitor` can be `val_loss`, `val_profile_loss` or
+`val_count_loss`; checkpoint selection and early stopping continue to use the
+total validation loss. `seed` controls model and library random state, while
+`shuffle_seed` independently controls training-example order. Set
+`device: auto` to use `cuda:0` when CUDA is available and otherwise fall back
+to CPU. Explicit CUDA devices are validated and do not silently fall back.
 
 ## Evaluate a Checkpoint
 

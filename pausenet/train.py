@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import fields
 import json
+import math
 import random
 import time
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +24,41 @@ from .metrics import js_distance_rows, safe_pearson
 from .model import PauseNet, PauseNetConfig
 
 
+TOP_LEVEL_CONFIG_KEYS = {"data", "model", "training"}
+DATA_CONFIG_KEYS = {"data_dir"}
+TRAINING_CONFIG_KEYS = {
+    "output_dir",
+    "device",
+    "batch_size",
+    "num_workers",
+    "learning_rate",
+    "weight_decay",
+    "max_epochs",
+    "patience",
+    "seed",
+    "shuffle_seed",
+    "counts_weight",
+    "profile_loss",
+    "grad_accum_steps",
+    "progress",
+    "scheduler",
+}
+SCHEDULER_CONFIG_KEYS = {
+    "type",
+    "monitor",
+    "factor",
+    "patience",
+    "min_lr",
+    "threshold",
+}
+SCHEDULER_MONITORS = {
+    "val_loss": "loss",
+    "val_profile_loss": "profile_loss",
+    "val_count_loss": "count_loss",
+}
+PROFILE_LOSSES = {"mnll", "multiresolution_jsd"}
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -28,30 +66,287 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def _mapping_section(config: Mapping, name: str, required: bool = False) -> dict:
+    if name not in config:
+        if required:
+            raise ValueError(f"Missing required configuration section: {name}")
+        return {}
+    section = config[name]
+    if not isinstance(section, Mapping):
+        raise ValueError(f"Configuration section '{name}' must be a mapping.")
+    return dict(section)
+
+
+def _reject_unknown_keys(section: Mapping, allowed: set[str], section_name: str) -> None:
+    unknown = sorted(set(section) - allowed)
+    if unknown:
+        raise ValueError(
+            f"Unknown key(s) in configuration section '{section_name}': "
+            f"{', '.join(unknown)}"
+        )
+
+
+def _require_nonempty_string(section: Mapping, key: str, section_name: str) -> None:
+    value = section.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"'{section_name}.{key}' must be a non-empty string.")
+
+
+def _validate_integer(
+    section: Mapping,
+    key: str,
+    section_name: str,
+    *,
+    minimum: int,
+) -> None:
+    if key not in section:
+        return
+    value = section[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(
+            f"'{section_name}.{key}' must be an integer greater than or equal to {minimum}."
+        )
+
+
+def _validate_number(
+    section: Mapping,
+    key: str,
+    section_name: str,
+    *,
+    minimum: float,
+    inclusive: bool = True,
+) -> None:
+    if key not in section:
+        return
+    value = section[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"'{section_name}.{key}' must be a finite number.")
+    numeric = float(value)
+    valid_bound = numeric >= minimum if inclusive else numeric > minimum
+    if not math.isfinite(numeric) or not valid_bound:
+        comparison = "greater than or equal to" if inclusive else "greater than"
+        raise ValueError(
+            f"'{section_name}.{key}' must be a finite number {comparison} {minimum}."
+        )
+
+
+def validate_config(config: dict) -> dict:
+    """Validate a training configuration and reject misspelled or invalid fields."""
+
+    if not isinstance(config, Mapping):
+        raise ValueError("The training configuration must be a mapping.")
+    config = dict(config)
+    _reject_unknown_keys(config, TOP_LEVEL_CONFIG_KEYS, "root")
+
+    data_cfg = _mapping_section(config, "data", required=True)
+    model_cfg = _mapping_section(config, "model")
+    training_cfg = _mapping_section(config, "training", required=True)
+
+    _reject_unknown_keys(data_cfg, DATA_CONFIG_KEYS, "data")
+    model_keys = {field.name for field in fields(PauseNetConfig)}
+    _reject_unknown_keys(model_cfg, model_keys, "model")
+    _reject_unknown_keys(training_cfg, TRAINING_CONFIG_KEYS, "training")
+
+    _require_nonempty_string(data_cfg, "data_dir", "data")
+    _require_nonempty_string(training_cfg, "output_dir", "training")
+    if "device" in training_cfg:
+        _require_nonempty_string(training_cfg, "device", "training")
+
+    for key in (
+        "input_length",
+        "output_length",
+        "channels",
+        "n_dilated_layers",
+        "profile_kernel_size",
+        "stem_kernel_size",
+    ):
+        _validate_integer(model_cfg, key, "model", minimum=1)
+    _validate_number(model_cfg, "dropout", "model", minimum=0.0)
+    if float(model_cfg.get("dropout", 0.0)) >= 1.0:
+        raise ValueError("'model.dropout' must be less than 1.0.")
+
+    _validate_integer(training_cfg, "batch_size", "training", minimum=1)
+    _validate_integer(training_cfg, "num_workers", "training", minimum=0)
+    _validate_integer(training_cfg, "max_epochs", "training", minimum=1)
+    _validate_integer(training_cfg, "patience", "training", minimum=0)
+    _validate_integer(training_cfg, "seed", "training", minimum=0)
+    _validate_integer(training_cfg, "shuffle_seed", "training", minimum=0)
+    _validate_integer(training_cfg, "grad_accum_steps", "training", minimum=1)
+    _validate_number(
+        training_cfg,
+        "learning_rate",
+        "training",
+        minimum=0.0,
+        inclusive=False,
+    )
+    _validate_number(training_cfg, "weight_decay", "training", minimum=0.0)
+    _validate_number(training_cfg, "counts_weight", "training", minimum=0.0)
+
+    if "progress" in training_cfg and not isinstance(training_cfg["progress"], bool):
+        raise ValueError("'training.progress' must be true or false.")
+    profile_loss = str(training_cfg.get("profile_loss", "mnll"))
+    if profile_loss not in PROFILE_LOSSES:
+        raise ValueError(
+            f"'training.profile_loss' must be one of: {', '.join(sorted(PROFILE_LOSSES))}."
+        )
+
+    scheduler_cfg = training_cfg.get("scheduler")
+    if scheduler_cfg is not None:
+        if not isinstance(scheduler_cfg, Mapping):
+            raise ValueError("'training.scheduler' must be a mapping.")
+        scheduler_cfg = dict(scheduler_cfg)
+        _reject_unknown_keys(scheduler_cfg, SCHEDULER_CONFIG_KEYS, "training.scheduler")
+        scheduler_type = str(scheduler_cfg.get("type", "reduce_on_plateau"))
+        if scheduler_type not in {"none", "reduce_on_plateau"}:
+            raise ValueError(
+                "'training.scheduler.type' must be 'none' or 'reduce_on_plateau'."
+            )
+        monitor = str(scheduler_cfg.get("monitor", "val_loss"))
+        if monitor not in SCHEDULER_MONITORS:
+            raise ValueError(
+                "'training.scheduler.monitor' must be one of: "
+                f"{', '.join(sorted(SCHEDULER_MONITORS))}."
+            )
+        _validate_number(
+            scheduler_cfg,
+            "factor",
+            "training.scheduler",
+            minimum=0.0,
+            inclusive=False,
+        )
+        factor = float(scheduler_cfg.get("factor", 0.5))
+        if factor >= 1.0:
+            raise ValueError("'training.scheduler.factor' must be less than 1.0.")
+        _validate_integer(
+            scheduler_cfg,
+            "patience",
+            "training.scheduler",
+            minimum=0,
+        )
+        _validate_number(
+            scheduler_cfg,
+            "min_lr",
+            "training.scheduler",
+            minimum=0.0,
+        )
+        _validate_number(
+            scheduler_cfg,
+            "threshold",
+            "training.scheduler",
+            minimum=0.0,
+        )
+        scheduler_patience = int(scheduler_cfg.get("patience", 2))
+        early_stopping_patience = int(training_cfg.get("patience", 8))
+        if (
+            scheduler_type == "reduce_on_plateau"
+            and early_stopping_patience > 0
+            and scheduler_patience >= early_stopping_patience
+        ):
+            warnings.warn(
+                "training.scheduler.patience is greater than or equal to "
+                "training.patience; early stopping may occur before the reduced "
+                "learning rate has time to help.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    return config
+
+
 def load_config(path: str | Path) -> dict:
     with Path(path).open() as handle:
-        return yaml.safe_load(handle)
+        return validate_config(yaml.safe_load(handle))
 
 
-def make_loader(dataset: PauseNetDataset, batch_size: int, num_workers: int, shuffle: bool):
-    generator = torch.Generator()
-    generator.manual_seed(12345)
+def make_loader(
+    dataset: PauseNetDataset,
+    batch_size: int,
+    num_workers: int,
+    shuffle: bool,
+    *,
+    seed: int = 12345,
+    pin_memory: bool = False,
+):
+    generator = None
+    if shuffle:
+        generator = torch.Generator()
+        generator.manual_seed(seed)
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        generator=generator if shuffle else None,
+        generator=generator,
     )
 
 
 def model_config_from_dict(config: dict) -> PauseNetConfig:
     model_cfg = dict(config.get("model", {}))
     allowed = {field.name for field in fields(PauseNetConfig)}
-    model_cfg = {key: value for key, value in model_cfg.items() if key in allowed}
+    _reject_unknown_keys(model_cfg, allowed, "model")
     return PauseNetConfig(**model_cfg)
+
+
+def resolve_device(requested: str) -> torch.device:
+    """Resolve auto/cpu/cuda devices and fail clearly for unavailable CUDA devices."""
+
+    requested = str(requested).strip().lower()
+    if requested == "auto":
+        requested = "cuda:0" if torch.cuda.is_available() else "cpu"
+    try:
+        device = torch.device(requested)
+    except (RuntimeError, ValueError) as error:
+        raise ValueError(
+            f"Invalid training device '{requested}'. Use auto, cpu or cuda:<index>."
+        ) from error
+
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"Training device '{requested}' requires CUDA, but CUDA is not available. "
+                "Use device: auto to permit CPU fallback."
+            )
+        index = 0 if device.index is None else device.index
+        device_count = torch.cuda.device_count()
+        if index < 0 or index >= device_count:
+            raise ValueError(
+                f"CUDA device index {index} is unavailable; "
+                f"torch.cuda.device_count() returned {device_count}."
+            )
+        return torch.device(f"cuda:{index}")
+    if device.type != "cpu":
+        raise ValueError(
+            f"Unsupported training device type '{device.type}'. "
+            "Use auto, cpu or cuda:<index>."
+        )
+    return device
+
+
+def make_scheduler(
+    optimizer: torch.optim.Optimizer,
+    training_config: Mapping,
+) -> tuple[torch.optim.lr_scheduler.ReduceLROnPlateau | None, str | None]:
+    """Build the configured scheduler and return its validation metric key."""
+
+    scheduler_cfg = training_config.get("scheduler")
+    if scheduler_cfg is None:
+        return None, None
+    scheduler_cfg = dict(scheduler_cfg)
+    scheduler_type = str(scheduler_cfg.get("type", "reduce_on_plateau"))
+    if scheduler_type == "none":
+        return None, None
+    monitor = str(scheduler_cfg.get("monitor", "val_loss"))
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=float(scheduler_cfg.get("factor", 0.5)),
+        patience=int(scheduler_cfg.get("patience", 2)),
+        threshold=float(scheduler_cfg.get("threshold", 1e-4)),
+        min_lr=float(scheduler_cfg.get("min_lr", 1e-6)),
+    )
+    return scheduler, SCHEDULER_MONITORS[monitor]
 
 
 def run_epoch(
@@ -64,7 +359,10 @@ def run_epoch(
 ) -> tuple[dict, dict]:
     training = optimizer is not None
     model.train(training)
-    loss_totals = np.zeros(4, dtype=np.float64)
+    profile_loss_sum = 0.0
+    profile_valid_count = 0
+    count_loss_sum = 0.0
+    sample_count = 0
     observed_counts_all = []
     predicted_log_counts_all = []
     masks_all = []
@@ -110,15 +408,12 @@ def run_epoch(
                     optimizer.zero_grad(set_to_none=True)
 
             batch_size = len(sequence_codes)
-            loss_totals += np.array(
-                [
-                    float(total_loss.detach()),
-                    float(profile_component.detach()),
-                    float(count_component.detach()),
-                    batch_size,
-                ],
-                dtype=np.float64,
-            ) * np.array([batch_size, batch_size, batch_size, 1], dtype=np.float64)
+            valid_profiles = profile_mask.bool() & (profiles.sum(dim=-1) > 0)
+            valid_count = int(valid_profiles.sum().item())
+            profile_loss_sum += float(profile_component.detach()) * valid_count
+            profile_valid_count += valid_count
+            count_loss_sum += float(count_component.detach()) * batch_size
+            sample_count += batch_size
 
             if not training:
                 observed_counts_all.append(batch["counts"].numpy())
@@ -130,11 +425,15 @@ def run_epoch(
                         torch.softmax(profile_logits.float(), dim=-1).detach().cpu().numpy()
                     )
 
-    n = max(loss_totals[3], 1)
+    profile_epoch_loss = (
+        profile_loss_sum / profile_valid_count if profile_valid_count > 0 else 0.0
+    )
+    count_epoch_loss = count_loss_sum / max(sample_count, 1)
     metrics = {
-        "loss": float(loss_totals[0] / n),
-        "profile_loss": float(loss_totals[1] / n),
-        "count_loss": float(loss_totals[2] / n),
+        "loss": float(profile_epoch_loss + counts_weight * count_epoch_loss),
+        "profile_loss": float(profile_epoch_loss),
+        "count_loss": float(count_epoch_loss),
+        "profile_valid_n": int(profile_valid_count),
     }
     outputs = {}
     if not training:
@@ -181,61 +480,77 @@ def save_checkpoint(path: Path, model: PauseNet, config: dict, epoch: int, metri
 
 
 def train_from_config(config: dict) -> Path:
-    set_seed(int(config["training"].get("seed", 20260713)))
+    config = validate_config(config)
+    training_config = config["training"]
+    seed = int(training_config.get("seed", 20260713))
+    shuffle_seed = int(training_config.get("shuffle_seed", 12345))
+    set_seed(seed)
     data_dir = Path(config["data"]["data_dir"])
-    output_dir = Path(config["training"]["output_dir"])
+    output_dir = Path(training_config["output_dir"])
+    device = resolve_device(training_config.get("device", "cuda:0"))
     output_dir.mkdir(parents=True, exist_ok=True)
-    device = torch.device(config["training"].get("device", "cuda:0"))
 
     train_dataset = PauseNetDataset(data_dir / "train")
     validation_dataset = PauseNetDataset(data_dir / "validation")
     model = PauseNet(model_config_from_dict(config)).to(device)
     train_loader = make_loader(
         train_dataset,
-        int(config["training"].get("batch_size", 64)),
-        int(config["training"].get("num_workers", 4)),
+        int(training_config.get("batch_size", 64)),
+        int(training_config.get("num_workers", 4)),
         shuffle=True,
+        seed=shuffle_seed,
+        pin_memory=device.type == "cuda",
     )
     validation_loader = make_loader(
         validation_dataset,
-        int(config["training"].get("batch_size", 64)),
-        int(config["training"].get("num_workers", 4)),
+        int(training_config.get("batch_size", 64)),
+        int(training_config.get("num_workers", 4)),
         shuffle=False,
+        seed=shuffle_seed,
+        pin_memory=device.type == "cuda",
     )
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=float(config["training"].get("learning_rate", 2e-4)),
-        weight_decay=float(config["training"].get("weight_decay", 1e-5)),
+        lr=float(training_config.get("learning_rate", 2e-4)),
+        weight_decay=float(training_config.get("weight_decay", 1e-5)),
     )
+    scheduler, scheduler_metric_key = make_scheduler(optimizer, training_config)
 
     with (output_dir / "run_config.json").open("w") as handle:
         json.dump(config, handle, indent=2)
 
     best_metric = float("inf")
     best_path = output_dir / "best_model.pt"
-    patience = int(config["training"].get("patience", 8))
-    max_epochs = int(config["training"].get("max_epochs", 60))
+    patience = int(training_config.get("patience", 8))
+    max_epochs = int(training_config.get("max_epochs", 60))
     wait = 0
     history_path = output_dir / "training_history.tsv"
     with history_path.open("w") as history:
         history.write(
             "epoch\ttrain_loss\ttrain_profile_loss\ttrain_count_loss\t"
             "val_loss\tval_profile_loss\tval_count_loss\t"
-            "val_count_pearson_log1p\tseconds\n"
+            "val_count_pearson_log1p\ttrain_profile_valid_n\t"
+            "val_profile_valid_n\tlearning_rate\tseconds\n"
         )
         for epoch in range(1, max_epochs + 1):
             start = time.time()
             train_metrics, _ = run_epoch(model, train_loader, device, config, optimizer=optimizer)
             val_metrics, _ = run_epoch(model, validation_loader, device, config)
             seconds = time.time() - start
+            learning_rate = float(optimizer.param_groups[0]["lr"])
             history.write(
                 f"{epoch}\t{train_metrics['loss']:.6f}\t"
                 f"{train_metrics['profile_loss']:.6f}\t{train_metrics['count_loss']:.6f}\t"
                 f"{val_metrics['loss']:.6f}\t{val_metrics['profile_loss']:.6f}\t"
                 f"{val_metrics['count_loss']:.6f}\t"
-                f"{val_metrics['count_pearson_log1p']:.6f}\t{seconds:.1f}\n"
+                f"{val_metrics['count_pearson_log1p']:.6f}\t"
+                f"{train_metrics['profile_valid_n']}\t{val_metrics['profile_valid_n']}\t"
+                f"{learning_rate:.10g}\t{seconds:.1f}\n"
             )
             history.flush()
+            if scheduler is not None:
+                assert scheduler_metric_key is not None
+                scheduler.step(float(val_metrics[scheduler_metric_key]))
             selection_metric = float(val_metrics["loss"])
             if selection_metric < best_metric:
                 best_metric = selection_metric

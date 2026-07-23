@@ -20,9 +20,16 @@ training:
   num_workers: 4
   learning_rate: 0.00014
   weight_decay: 0.00001
+  scheduler:
+    type: reduce_on_plateau
+    monitor: val_loss
+    factor: 0.5
+    patience: 2
+    min_lr: 0.000001
   max_epochs: 60
   patience: 8
   seed: 20260713
+  shuffle_seed: 12345
   counts_weight: 100.0
   profile_loss: mnll
   grad_accum_steps: 1
