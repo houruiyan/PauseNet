@@ -356,7 +356,6 @@ def run_epoch(
     config: dict,
     optimizer: torch.optim.Optimizer | None = None,
     keep_profiles: bool = False,
-    eval_metrics: bool = True,
 ) -> tuple[dict, dict]:
     training = optimizer is not None
     model.train(training)
@@ -442,31 +441,29 @@ def run_epoch(
         predicted_log_counts = np.concatenate(predicted_log_counts_all)
         predicted_counts = np.expm1(predicted_log_counts).clip(min=0)
         profile_masks = np.concatenate(masks_all).astype(bool)
+        metrics["count_pearson_log1p"] = safe_pearson(
+            np.log1p(observed_counts), predicted_log_counts
+        )
+        metrics["count_pearson_raw"] = safe_pearson(observed_counts, predicted_counts)
         outputs = {
             "observed_counts": observed_counts,
             "predicted_log1p_counts": predicted_log_counts,
             "predicted_counts": predicted_counts,
             "profile_masks": profile_masks,
         }
-        if eval_metrics:
-            metrics["count_pearson_log1p"] = safe_pearson(
-                np.log1p(observed_counts), predicted_log_counts
-            )
-            metrics["count_pearson_raw"] = safe_pearson(observed_counts, predicted_counts)
         if keep_profiles:
             observed_profiles = np.concatenate(observed_profiles_all)
             predicted_profiles = np.concatenate(predicted_profiles_all)
             outputs["observed_profiles"] = observed_profiles
             outputs["predicted_profiles"] = predicted_profiles
-            if eval_metrics:
-                valid = profile_masks & (observed_profiles.sum(axis=1) > 0)
-                metrics["profile_jsd_n"] = int(valid.sum())
-                for resolution in (1, 5, 10, 20):
-                    values = js_distance_rows(
-                        observed_profiles[valid], predicted_profiles[valid], resolution
-                    )
-                    metrics[f"profile_jsd_{resolution}bp_mean"] = float(np.mean(values))
-                    metrics[f"profile_jsd_{resolution}bp_median"] = float(np.median(values))
+            valid = profile_masks & (observed_profiles.sum(axis=1) > 0)
+            metrics["profile_jsd_n"] = int(valid.sum())
+            for resolution in (1, 5, 10, 20):
+                values = js_distance_rows(
+                    observed_profiles[valid], predicted_profiles[valid], resolution
+                )
+                metrics[f"profile_jsd_{resolution}bp_mean"] = float(np.mean(values))
+                metrics[f"profile_jsd_{resolution}bp_median"] = float(np.median(values))
     return metrics, outputs
 
 
