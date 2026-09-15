@@ -143,38 +143,16 @@ pausenet evaluate \
   --data-dir /path/to/my_dataset \
   --checkpoint /path/to/checkpoint.pt \
   --split test \
-  --profile-count-thresholds 0 100 200 500 \
   --output-dir outputs/my_test_eval
 ```
 
-Evaluation reports:
+Evaluation writes:
 
-- Pearson correlation for observed vs predicted `log1p(counts)`;
-- raw count Pearson correlation;
-- profile Jensen-Shannon distance at 1, 5, 10 and 20 bp resolution.
+- `test_profiles.npz`: observed/predicted counts and per-position profiles,
+  profile masks, and manifest columns.
+- `test_metrics.json`: loss summaries and evaluated window counts.
 
-It also writes `test_predictions.tsv`, `test_profile_similarity.tsv` and
-`test_profile_similarity_by_count_threshold.tsv`. The threshold table reports
-profile similarity after filtering on observed total counts (0, 100, 200 and
-500 by default). These outputs can be visualized after installing the optional
-figure dependencies:
-
-```bash
-python -m pip install -e ".[figures]"
-
-pausenet visualize \
-  --evaluation-dir outputs/my_test_eval \
-  --split test \
-  --format png
-```
-
-This creates `figures/test_count_scatter.png` (observed versus predicted
-`log1p(counts)`) and `figures/test_profile_similarity.png` (mean `1 - JSD` at
-1, 5, 10 and 20 bp, faceted by observed count threshold). The profile plot
-compares PauseNet with a binomially split pseudoreplicate baseline and a
-within-profile random-permutation baseline. Use
-`--output-dir /path/to/figures` to choose another destination, or `--format pdf`
-or `--format svg` for vector output.
+The evaluation command does not generate figures or similarity TSV tables.
 
 ## Pretrained Models
 
