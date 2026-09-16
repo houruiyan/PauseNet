@@ -63,18 +63,11 @@ install the optional genomics dependencies:
 pip install -e ".[genomics]"
 ```
 
-## Quick CPU Smoke Test
+## Test Data
 
-After installation, run this offline end-to-end test from the repository root:
-
-```bash
-python examples/smoke_test/run_smoke_test.py
-```
-
-It creates a tiny synthetic dataset, trains a reduced model for two epochs,
-reloads its checkpoint and checks the prediction outputs. No GPU or pretrained
-weights are required. This checks software functionality, not biological
-accuracy. See [the smoke-test guide](examples/smoke_test/README.md) for details.
+Test data are available on [Zenodo](https://doi.org/10.5281/zenodo.21371748).
+Download the test data and follow the data preparation and evaluation instructions
+below to test PauseNet with the pretrained model weights available from the same record.
 
 ## Standard Data Format
 
