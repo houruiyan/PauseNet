@@ -63,6 +63,19 @@ install the optional genomics dependencies:
 pip install -e ".[genomics]"
 ```
 
+## Quick CPU Smoke Test
+
+After installation, run this offline end-to-end test from the repository root:
+
+```bash
+python examples/smoke_test/run_smoke_test.py
+```
+
+It creates a tiny synthetic dataset, trains a reduced model for two epochs,
+reloads its checkpoint and checks the prediction outputs. No GPU or pretrained
+weights are required. This checks software functionality, not biological
+accuracy. See [the smoke-test guide](examples/smoke_test/README.md) for details.
+
 ## Standard Data Format
 
 Each dataset should be converted into split directories:
@@ -156,9 +169,9 @@ The evaluation command does not generate figures or similarity TSV tables.
 
 ## Pretrained Models
 
-Pretrained model weights are not stored directly in this repository. Model
-cards and metrics live under [pretrained/](pretrained/). Large checkpoint files
-should be distributed through GitHub Releases, Zenodo or Hugging Face.
+Pretrained PauseNet model weights are available on
+[Zenodo](https://doi.org/10.5281/zenodo.21371748).
+Model cards and evaluation metrics are provided under [pretrained/](pretrained/).
 
 ## Manuscript Figure Code
 
