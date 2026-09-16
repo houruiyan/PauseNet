@@ -66,7 +66,7 @@ pip install -e ".[genomics]"
 ## Test Data
 
 Test data are available on [Zenodo](https://doi.org/10.5281/zenodo.21371748).
-Download the test data and follow the data preparation and evaluation instructions
+Download the test data and follow the data preparation and train instructions to test model. And you can also follow evaluation instructions
 below to test PauseNet with the pretrained model weights available from the same record.
 
 ## Standard Data Format
