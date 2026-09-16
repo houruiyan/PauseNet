@@ -173,4 +173,4 @@ The paper code is intentionally separated from the reusable model package.
 
 ## Citation
 
-Citation information will be added after the manuscript/preprint is available.
+Coming soon.
