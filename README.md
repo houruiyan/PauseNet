@@ -161,7 +161,6 @@ The evaluation command does not generate figures or similarity TSV tables.
 
 Pretrained PauseNet model weights are available on
 [Zenodo](https://doi.org/10.5281/zenodo.21371748).
-Model cards and evaluation metrics are provided under [pretrained/](pretrained/).
 
 ## Manuscript Figure Code
 
