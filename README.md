@@ -18,7 +18,7 @@ PauseNet takes strand-oriented DNA sequence as input and predicts two outputs:
 - a base-resolution profile distribution over a 1,000-bp prediction window;
 - the total pausing activity as predicted `log1p(counts)`.
 
-PauseNet uses a ProCapNet-style sequence-only architecture: a shared dilated
+PauseNet uses a sequence-only architecture: a shared dilated
 residual Conv1D backbone followed by one profile head and one count head.
 
 ```text
@@ -37,15 +37,12 @@ softmax over 1,000 bp     linear 128->1 + softplus
 1,000-bp profile          log1p(counts)
 ```
 
-The default loss is the ProCapNet-style multi-task objective:
+The default loss is defined as follows:
 
 ```text
 L = MNLL(profile) + 100 * MSE(log1p counts)
 ```
 
-Because the training examples are already strand-oriented, PauseNet uses a
-single softmax over the 1,000-bp output region rather than a joint
-strand-position softmax.
 
 ## Installation
 
